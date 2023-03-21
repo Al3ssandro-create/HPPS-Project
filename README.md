@@ -5,4 +5,4 @@ HPPS project on GMM benchmark
 - [Part3]()
 ## Developers
 [Alessandro Martinolli](https://github.com/Al3ssandro-create) &
-[Matteo Luppi](https://github.com/Matteo-Negro)
+[Matteo Negro](https://github.com/Matteo-Negro)
