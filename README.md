@@ -1,6 +1,6 @@
 # HPPS-Project
 HPPS project on GMM benchmark
-- [Part1]()
+- [Part1](https://github.com/Al3ssandro-create/HPPS-Project/tree/main/Project/Part%201)
 - [Part2]()
 - [Part3]()
 ## Developers
