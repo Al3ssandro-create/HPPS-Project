@@ -119,7 +119,7 @@ void seed_clusters(clusters_t* clusters, float* fcs_data, int num_clusters, int 
     } else {
         fraction = 0.0;
     }
-    srand((unsigned int) time(NULL));
+    srand((unsigned int) 0);
     // Sets the means from evenly distributed points in the input data
     for(int c=0; c < num_clusters; c++) {
         clusters->N[c] = (float)num_events/(float)num_clusters;
