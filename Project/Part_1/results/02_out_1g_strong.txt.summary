@@ -1,72 +1,72 @@
 Cluster #0
-Probability: 0.262676
-N: 105070.359375
-Means: 621.694824 
+Probability: 0.067383
+N: 6738.309082
+Means: -6670.347168 
 
 R Matrix:
-2736315.750000 
+40897.812500 
 
 
 Cluster #1
-Probability: 0.079044
-N: 31617.687500
-Means: -9338.934570 
+Probability: 0.166670
+N: 16666.974609
+Means: 3869.681641 
 
 R Matrix:
-204208.390625 
+1802786.625000 
 
 
 Cluster #2
-Probability: 0.146722
-N: 58688.617188
-Means: -7227.356934 
+Probability: 0.231314
+N: 23131.441406
+Means: 8098.632812 
 
 R Matrix:
-1005045.562500 
+1235044.500000 
 
 
 Cluster #3
-Probability: 0.089128
-N: 35651.347656
-Means: 9006.073242 
+Probability: 0.174597
+N: 17459.718750
+Means: -1856.515991 
 
 R Matrix:
-364883.375000 
+672100.187500 
 
 
 Cluster #4
-Probability: 0.022801
-N: 9120.277344
-Means: 3290.598389 
+Probability: 0.143041
+N: 14304.121094
+Means: -8622.868164 
 
 R Matrix:
-58758.457031 
+593804.500000 
 
 
 Cluster #5
-Probability: 0.032759
-N: 13103.507812
-Means: -2410.807617 
+Probability: 0.033121
+N: 3312.116943
+Means: -5614.206543 
 
 R Matrix:
-180439.578125 
+56305.015625 
 
 
 Cluster #6
-Probability: 0.150558
-N: 60223.328125
-Means: -4469.621094 
+Probability: 0.096345
+N: 9634.503906
+Means: 237.767868 
 
 R Matrix:
-1071334.375000 
+244210.265625 
 
 
 Cluster #7
-Probability: 0.216312
-N: 86524.703125
-Means: 5976.757812 
+Probability: 0.087528
+N: 8752.810547
+Means: -4024.314697 
 
 R Matrix:
-2269337.000000 
+350111.562500 
 
 
