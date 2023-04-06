@@ -60,3 +60,51 @@ Final rissanen Score was: 3965821.000000, with 8 clusters.
 | Order Reduce:  | 0.3334 | 25   | 0.0133 |
 | GPU Memcpy:    | 0.5152 |
 | CPU:           | 0.4302 |
+### Iter - 2.1
+Final rissanen Score was: 1976355.125000, with 8 clusters.
+GPU 0:
+        E-step Kernel:   0.1890 1527     0.0001
+        M-step Kernel:   0.5432 1502     0.0004
+        Consts Kernel:   0.0355 1503     0.0000
+        Order Reduce:    0.0817 25       0.0033
+        GPU Memcpy:      0.2212
+        CPU:             0.1296
+GPU 1:
+        E-step Kernel:   0.1888 1527     0.0001
+        M-step Kernel:   0.5427 1502     0.0004
+        Consts Kernel:   0.0322 1503     0.0000
+        Order Reduce:    0.0804 25       0.0032
+        GPU Memcpy:      0.2154
+        CPU:             0.1339
+### Iter - 2.2
+Final rissanen Score was: 1976355.125000, with 8 clusters.
+GPU 0:
+        E-step Kernel:   0.1838 1527     0.0001
+        M-step Kernel:   0.5353 1502     0.0004
+        Consts Kernel:   0.0353 1503     0.0000
+        Order Reduce:    0.0842 25       0.0034
+        GPU Memcpy:      0.2271
+        CPU:             0.1301
+GPU 1:
+        E-step Kernel:   0.1837 1527     0.0001
+        M-step Kernel:   0.5346 1502     0.0004
+        Consts Kernel:   0.0322 1503     0.0000
+        Order Reduce:    0.0819 25       0.0033
+        GPU Memcpy:      0.2150
+        CPU:             0.1373
+### Iter - 2.3
+Final rissanen Score was: 1976355.125000, with 8 clusters.
+GPU 1:
+        E-step Kernel:   0.1839 1527     0.0001
+        M-step Kernel:   0.5352 1502     0.0004
+        Consts Kernel:   0.0323 1503     0.0000
+        Order Reduce:    0.0807 25       0.0032
+        GPU Memcpy:      0.2170
+        CPU:             0.1360
+GPU 0:
+        E-step Kernel:   0.1836 1527     0.0001
+        M-step Kernel:   0.5353 1502     0.0004
+        Consts Kernel:   0.0350 1503     0.0000
+        Order Reduce:    0.0828 25       0.0033
+        GPU Memcpy:      0.2280
+        CPU:             0.1291
