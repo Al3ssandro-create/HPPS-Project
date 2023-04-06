@@ -2,7 +2,7 @@
 ## Run - Weak
 ### Iter - 1.1
 Final rissanen Score was: 984368.437500, with 8 clusters.
-| Col1           | Timer  | RGI  | (T*1k)/RGI |
+| Col1           | Time  | Calls  | Time/Calls |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.3385 | 1265 | 0.0003 |
 | M-step Kernel: | 0.4122 | 1240 | 0.0003 |
@@ -12,7 +12,7 @@ Final rissanen Score was: 984368.437500, with 8 clusters.
 | CPU:           | 0.0890 |
 ### Iter - 1.2
 Final rissanen Score was: 984673.750000, with 8 clusters.
-| Col1           | Col2   | Col3 | Col4   |
+| Col1           | Time   | Calls | Time/Calls   |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.3023 | 1146 | 0.0003 |
 | M-step Kernel: | 0.3690 | 1121 | 0.0003 |
@@ -22,7 +22,7 @@ Final rissanen Score was: 984673.750000, with 8 clusters.
 | CPU:           | 0.0889 |
 ### Iter - 1.3
 Final rissanen Score was: 984366.937500, with 8 clusters.
-| Col1           | Col2   | Col3 | Col4   |
+| Col1           | Time   | Calls | Time/Calls   |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.3325 | 1321 | 0.0003 |
 | M-step Kernel: | 0.4306 | 1296 | 0.0003 |
@@ -31,7 +31,7 @@ Final rissanen Score was: 984366.937500, with 8 clusters.
 | GPU Memcpy:    | 0.1672 |
 ### Iter - 2.1
 Final rissanen Score was: 1976355.125000, with 8 clusters.
-| GPU-0          | Timer  | RGI  | (T*1k)/RGI |
+| GPU-0          | Time  | Calls  | Time/Calls|
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1901 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5460 | 1502 | 0.0004 |
@@ -40,7 +40,7 @@ Final rissanen Score was: 1976355.125000, with 8 clusters.
 | GPU Memcpy:    | 0.2249 |
 | CPU:           | 0.1457 |
 
-| GPU-1          | Timer  | RGI  | (T*1k)/RGI |
+| GPU-1          | Time  | Calls  | Time/Calls |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1878 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5406 | 1502 | 0.0004 |
@@ -50,7 +50,7 @@ Final rissanen Score was: 1976355.125000, with 8 clusters.
 | CPU:           | 0.1337 |
 ### Iter - 2.2
 Final rissanen Score was: 1976355.125000, with 8 clusters.
-| GPU-0          | Timer  | RGI  | (T*1k)/RGI |
+| GPU-0          | Time  | Calls  | Time/Calls |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1838 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5347 | 1502 | 0.0004 |
@@ -59,7 +59,7 @@ Final rissanen Score was: 1976355.125000, with 8 clusters.
 | GPU Memcpy:    | 0.2308 |
 | CPU:           | 0.1384 |
 
-| GPU-1          | Timer  | RGI  | (T*1k)/RGI |
+| GPU-1          | Time  | Calls  | Time/Calls |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1840 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5355 | 1502 | 0.0004 |
@@ -69,7 +69,7 @@ Final rissanen Score was: 1976355.125000, with 8 clusters.
 | CPU:           | 0.1491 |
 ### Iter - 2.3
 Final rissanen Score was: 1976355.125000, with 8 clusters.
-| GPU-0          | Timer  | RGI  | (T*1k)/RGI |
+| GPU-0          | Time  | Calls  | Time/Calls |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1839 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5352 | 1502 | 0.0004 |
@@ -78,7 +78,7 @@ Final rissanen Score was: 1976355.125000, with 8 clusters.
 | GPU Memcpy:    | 0.2310 |
 | CPU:           | 0.1402 |
         
-| GPU-0          | Timer  | RGI  | (T*1k)/RGI |
+| GPU-0          | Time  | Calls  | Time/Calls |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1839 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5357 | 1502 | 0.0004 |
@@ -89,7 +89,7 @@ Final rissanen Score was: 1976355.125000, with 8 clusters.
 ## Run - Strong
 ### Iter - 1.1
 Final rissanen Score was: 984671.375000, with 8 clusters.
-| Col1           | Col2   | Col3 | Col4   |
+| Col1           | Time   | Calls | Time/Calls   |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.4925 | 1630 | 0.0003 |
 | M-step Kernel: | 0.5334 | 1605 | 0.0003 |
@@ -99,7 +99,7 @@ Final rissanen Score was: 984671.375000, with 8 clusters.
 | CPU:           | 0.0937 |
 ### Iter - 1.2
 Final rissanen Score was: 984671.375000, with 8 clusters.
-| Col1           | Col2   | Col3 | Col4   |
+| Col1           | Time   | Calls | Time/Calls  |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.4852 | 1630 | 0.0003 |
 | M-step Kernel: | 0.5292 | 1605 | 0.0003 |
@@ -109,7 +109,7 @@ Final rissanen Score was: 984671.375000, with 8 clusters.
 | CPU:           | 0.0908 |
 ### Iter - 1.3
 Final rissanen Score was: 984671.375000, with 8 clusters.
-| Col1           | Col2   | Col3 | Col4   |
+| Col1           | Time   | Calls | Time/Calls |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.4849 | 1630 | 0.0003 |
 | M-step Kernel: | 0.5295 | 1605 | 0.0003 |
@@ -119,7 +119,7 @@ Final rissanen Score was: 984671.375000, with 8 clusters.
 | CPU:           | 0.0903 |
 ### Iter - 2.1
 Final rissanen Score was: 1976355.125000, with 8 clusters.
-| GPU-0          | Col2   | Col3 | Col4   |
+| GPU-0          | Time   | Calls | Time/Calls |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1890 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5432 | 1502 | 0.0004 |
@@ -128,7 +128,7 @@ Final rissanen Score was: 1976355.125000, with 8 clusters.
 | GPU Memcpy:    | 0.2212 |
 | CPU:           | 0.1296 |
 
-| GPU-1          | Col2   | Col3 | Col4   |
+| GPU-1          | Time   | Calls | Time/Calls |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1888 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5427 | 1502 | 0.0004 |
@@ -138,7 +138,7 @@ Final rissanen Score was: 1976355.125000, with 8 clusters.
 | CPU:           | 0.1339 |
 ### Iter - 2.2
 Final rissanen Score was: 1976355.125000, with 8 clusters.
-| GPU-0          | Col2   | Col3 | Col4   |
+| GPU-0          | Time   | Calls | Time/Calls |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1838 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5353 | 1502 | 0.0004 |
@@ -147,7 +147,7 @@ Final rissanen Score was: 1976355.125000, with 8 clusters.
 | GPU Memcpy:    | 0.2271 |
 | CPU:           | 0.1301 |
 
-| GPU-1          | Col2   | Col3 | Col4   |
+| GPU-1          | Time   | Calls | Col4   |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1837 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5346 | 1502 | 0.0004 |
@@ -157,7 +157,7 @@ Final rissanen Score was: 1976355.125000, with 8 clusters.
 | CPU:           | 0.1373 |
 ### Iter - 2.3
 Final rissanen Score was: 1976355.125000, with 8 clusters.
-| GPU-0          | Col2   | Col3 | Col4   |
+| GPU-0          | Time   | Calls | Time/Calls |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1839 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5352 | 1502 | 0.0004 |
@@ -166,7 +166,7 @@ Final rissanen Score was: 1976355.125000, with 8 clusters.
 | GPU Memcpy:    | 0.2170 |
 | CPU:           | 0.1360 |
 
-| GPU-1          | Col2   | Col3 | Col4   |
+| GPU-1          | Time   | Calls | Time/Calls |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1836 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5353 | 1502 | 0.0004 |
