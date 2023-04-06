@@ -147,7 +147,7 @@ Final rissanen Score was: 1976355.125000, with 8 clusters.
 | GPU Memcpy:    | 0.2271 |
 | CPU:           | 0.1301 |
 
-| GPU-1          | Time   | Calls | Col4   |
+| GPU-1          | Time   | Calls | Time/Calls     |
 |:---------------|:------:|:----:|:------:|
 | E-step Kernel: | 0.1837 | 1527 | 0.0001 |
 | M-step Kernel: | 0.5346 | 1502 | 0.0004 |
