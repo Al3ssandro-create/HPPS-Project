@@ -29,6 +29,54 @@ Final rissanen Score was: 984366.937500, with 8 clusters.
 | Consts Kernel: | 0.0269 | 1297 | 0.0000 |
 | Order Reduce:  | 0.0703 | 25   | 0.0028 |
 | GPU Memcpy:    | 0.1672 |
+### Iter - 2.1
+Final rissanen Score was: 1976355.125000, with 8 clusters.
+GPU 1:
+        E-step Kernel:   0.1901 1527     0.0001
+        M-step Kernel:   0.5460 1502     0.0004
+        Consts Kernel:   0.0338 1503     0.0000
+        Order Reduce:    0.0854 25       0.0034
+        GPU Memcpy:      0.2249
+        CPU:             0.1457
+GPU 0:
+        E-step Kernel:   0.1878 1527     0.0001
+        M-step Kernel:   0.5406 1502     0.0004
+        Consts Kernel:   0.0353 1503     0.0000
+        Order Reduce:    0.0820 25       0.0033
+        GPU Memcpy:      0.2296
+        CPU:             0.1337
+### Iter - 2.2
+Final rissanen Score was: 1976355.125000, with 8 clusters.
+GPU 0:
+        E-step Kernel:   0.1838 1527     0.0001
+        M-step Kernel:   0.5347 1502     0.0004
+        Consts Kernel:   0.0350 1503     0.0000
+        Order Reduce:    0.0875 25       0.0035
+        GPU Memcpy:      0.2308
+        CPU:             0.1384
+GPU 1:
+        E-step Kernel:   0.1840 1527     0.0001
+        M-step Kernel:   0.5355 1502     0.0004
+        Consts Kernel:   0.0325 1503     0.0000
+        Order Reduce:    0.0877 25       0.0035
+        GPU Memcpy:      0.2207
+        CPU:             0.1491
+### Iter - 2.3
+Final rissanen Score was: 1976355.125000, with 8 clusters.
+GPU 0:
+        E-step Kernel:   0.1839 1527     0.0001
+        M-step Kernel:   0.5352 1502     0.0004
+        Consts Kernel:   0.0351 1503     0.0000
+        Order Reduce:    0.0905 25       0.0036
+        GPU Memcpy:      0.2310
+        CPU:             0.1402
+GPU 1:
+        E-step Kernel:   0.1839 1527     0.0001
+        M-step Kernel:   0.5357 1502     0.0004
+        Consts Kernel:   0.0327 1503     0.0000
+        Order Reduce:    0.0893 25       0.0036
+        GPU Memcpy:      0.2200
+        CPU:             0.1494
 ## Run - Strong
 ### Iter - 1.1
 Final rissanen Score was: 3965841.750000, with 8 clusters. 
