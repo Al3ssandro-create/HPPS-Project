@@ -53,7 +53,7 @@ NVCC = $(CUDA_DIR)/bin/nvcc
 NVCC_FLAGS = -arch=$(ARCH)  -O3 
 # Link
 NVCC_INCLUDE = -I. -I$(CUDA_DIR)/include -I$(SDK_DIR)/C/common/inc -I../../common/inc/ -I$(SDK_DIR)/shared/inc -I$(MPI_DIR)/include -I/home/lian599/include/
-NVCC_LIB = -lcuda -lmpich -lmpl -lnccl
+NVCC_LIB = -lcuda
 NVCC_LIB_PATH = -L. -L$(SDK_DIR)/C/lib -L$(LIB_DIR)/ -L$(SDK_DIR)/shared/lib -L$(MPI_DIR)/lib -L/home/lian599/lib/ -L/usr/lib/ -L/usr/lib64 
 
 

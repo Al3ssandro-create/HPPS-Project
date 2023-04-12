@@ -279,7 +279,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         // Then CUDA malloc structures on the device and copy them over
         startTimer(timers.memcpy);
         clusters_t* temp_clusters;
-        CUDA_SAFE_CALL(cudaMallocManaged((void**) &(temp_clusters->N),sizeof(float)*original_num_clusters));
+        CUDA_SAFE_CALL(cudaMallocManaged((void**) temp_clusters->N, sizeof(float)*original_num_clusters));
         CUDA_SAFE_CALL(cudaMallocManaged((void**) &(temp_clusters->pi),sizeof(float)*original_num_clusters));
         CUDA_SAFE_CALL(cudaMallocManaged((void**) &(temp_clusters->constant),sizeof(float)*original_num_clusters));
         CUDA_SAFE_CALL(cudaMallocManaged((void**) &(temp_clusters->avgvar),sizeof(float)*original_num_clusters));

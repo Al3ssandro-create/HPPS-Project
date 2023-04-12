@@ -1,5 +1,0 @@
-Usage: ../gmm num_clusters infile outfile [target_num_clusters]
-	 num_clusters: The number of starting clusters
-	 infile: ASCII space-delimited FCS data file
-	 outfile: Clustering results output file
-	 target_num_clusters: A desired number of clusters. Must be less than or equal to num_clusters
