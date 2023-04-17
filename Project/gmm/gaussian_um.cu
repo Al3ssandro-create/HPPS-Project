@@ -204,7 +204,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         }
     }
     // Only need one copy of all the memberships
-    CUDA_SAFE_CALL(cudaMallocManaged(&(clusters_um[0].memberships), sizeof(float)*num_events*original_num_clusters));
+    CUDA_SAFE_CALL(cudaMallocManaged(&(clusters_um[0].memberships), sizeof(float)*num_events*original_num_clusters*2));
     if(!clusters_um[0].memberships) {
         printf("ERROR: Could not allocate memory for clusters.\n"); 
         return NULL; 
@@ -219,7 +219,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
     saved_clusters->means = (float*) malloc(sizeof(float)*num_dimensions*original_num_clusters);
     saved_clusters->R = (float*) malloc(sizeof(float)*num_dimensions*num_dimensions*original_num_clusters);
     saved_clusters->Rinv = (float*) malloc(sizeof(float)*num_dimensions*num_dimensions*original_num_clusters);
-    saved_clusters->memberships = (float*) malloc(sizeof(float)*num_events*original_num_clusters);
+    saved_clusters->memberships = (float*) malloc(sizeof(float)*num_events*original_num_clusters*2);
     if(!saved_clusters->means || !saved_clusters->R || !saved_clusters->Rinv || !saved_clusters->memberships) { 
         printf("ERROR: Could not allocate memory for clusters.\n"); 
         return NULL; 
@@ -264,7 +264,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         scratch_cluster.means = (float*) malloc(sizeof(float)*num_dimensions);
         scratch_cluster.R = (float*) malloc(sizeof(float)*num_dimensions*num_dimensions);
         scratch_cluster.Rinv = (float*) malloc(sizeof(float)*num_dimensions*num_dimensions);
-        scratch_cluster.memberships = (float*) malloc(sizeof(float)*num_events);
+        scratch_cluster.memberships = (float*) malloc(sizeof(float)*num_events*2);
 
         DEBUG("Finished allocating memory on host for clusters.\n");
         stopTimer(timers.cpu);
