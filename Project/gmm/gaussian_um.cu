@@ -295,8 +295,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         int mem_size = num_dimensions * my_num_events * sizeof(float);
         CUDA_SAFE_CALL(cudaMallocManaged(&um_fcs_data_by_event, mem_size));
         CUDA_SAFE_CALL(cudaMallocManaged(&um_fcs_data_by_dimension, mem_size));
-
-        *um_fcs_data_by_event = fcs_data_by_event[num_dimensions*events_per_gpu*tid];
+        
+        memcpy(um_fcs_data_by_event, &fcs_data_by_event[num_dimensions*events_per_gpu*tid], mem_size);
 
         // Copying the transposed data is trickier since it's not all contigious for the relavant events
         float* temp_fcs_data = (float*) malloc(mem_size);
