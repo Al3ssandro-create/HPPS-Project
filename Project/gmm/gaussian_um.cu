@@ -17,6 +17,7 @@
 #include <math.h>
 #include <time.h> // for clock(), clock_t, CLOCKS_PER_SEC
 #include <omp.h>
+#include <chrono> 
 
 // includes, project
 #include "gaussian.h"
@@ -143,6 +144,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
     int reduce_iterations = 0;
 	int ideal_num_clusters;
 	int stop_number;
+   
+    auto start = std::chrono::steady_clock::now();
 
 	// Number of clusters to stop iterating at.
     if(desired_num_clusters == 0) {
@@ -177,10 +180,12 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             fcs_data_by_dimension[d*num_events+e] = fcs_data_by_event[e*num_dimensions+d];
         }
     }    
-
-    //cutStopTimer(timer_io);
-    //cutStartTimer(timer_cpu);
    
+    auto diff = std::chrono::steady_clock::now() - start;
+    PROFILING("Time for I/O inside cluster: %ld.\n", std::chrono::duration_cast<std::chrono::microseconds>(diff).count());
+
+    start = std::chrono::steady_clock::now();
+
     PRINT("Number of events: %d\n",num_events);
     PRINT("Number of dimensions: %d\n\n",num_dimensions);
     PRINT("Starting with %d cluster(s), will stop at %d cluster(s).\n",original_num_clusters,stop_number);
@@ -203,6 +208,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             return NULL; 
         }
     }
+    
     // Only need one copy of all the memberships
     CUDA_SAFE_CALL(cudaMallocManaged(&(clusters_um[0].memberships), sizeof(float)*num_events*original_num_clusters*2));
     if(!clusters_um[0].memberships) {
@@ -233,9 +239,12 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
     float likelihood, old_likelihood;
     float min_rissanen;
     
-    //cutStopTimer( timer_cpu);
+    diff = std::chrono::steady_clock::now() - start;
+    PROFILING("Time allocation on Host: %ld.\n", std::chrono::duration_cast<std::chrono::microseconds>(diff).count());
 
     // Main thread splits into one thread per GPU at this point
+
+    start = std::chrono::steady_clock::now();
     omp_set_num_threads(num_gpus);
     #pragma omp parallel shared(clusters_um,fcs_data_by_event,fcs_data_by_dimension,shared_likelihoods,likelihood,old_likelihood,ideal_num_clusters,min_rissanen,regroup_iterations) 
     {
@@ -279,22 +288,22 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         DEBUG("GPU %d will handle %d events\n",tid,my_num_events);     
 
         // allocate device memory for FCS data
-        float* d_fcs_data_by_event;
-        float* d_fcs_data_by_dimension;
+        float* um_fcs_data_by_event;
+        float* um_fcs_data_by_dimension;
         
         // allocate and copy relavant FCS data to device.
         int mem_size = num_dimensions * my_num_events * sizeof(float);
-        CUDA_SAFE_CALL(cudaMalloc( (void**) &d_fcs_data_by_event, mem_size));
-        CUDA_SAFE_CALL(cudaMalloc( (void**) &d_fcs_data_by_dimension, mem_size));
+        CUDA_SAFE_CALL(cudaMallocManaged(&um_fcs_data_by_event, mem_size));
+        CUDA_SAFE_CALL(cudaMallocManaged(&um_fcs_data_by_dimension, mem_size));
 
-        CUDA_SAFE_CALL(cudaMemcpy( d_fcs_data_by_event, &fcs_data_by_event[num_dimensions*events_per_gpu*tid], mem_size,cudaMemcpyHostToDevice) );
+        *um_fcs_data_by_event = fcs_data_by_event[num_dimensions*events_per_gpu*tid];
 
         // Copying the transposed data is trickier since it's not all contigious for the relavant events
         float* temp_fcs_data = (float*) malloc(mem_size);
         for(int d=0; d < num_dimensions; d++) {
             memcpy(&temp_fcs_data[d*my_num_events],&fcs_data_by_dimension[d*num_events + tid*events_per_gpu],sizeof(float)*my_num_events);
         }
-        CUDA_SAFE_CALL(cudaMemcpy( d_fcs_data_by_dimension, temp_fcs_data, mem_size,cudaMemcpyHostToDevice) );
+        mempcpy(um_fcs_data_by_dimension,temp_fcs_data,mem_size);
         cudaDeviceSynchronize();
         free(temp_fcs_data);
  
@@ -314,7 +323,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             //  Only tricky part is how to do average variance? 
             //  Make a kernel for that and reduce on host like the means/covariance?
             startTimer(timers.constants);
-            seed_clusters<<< 1, NUM_THREADS_MSTEP >>>( d_fcs_data_by_event, &(clusters_um[tid]), num_dimensions, original_num_clusters, my_num_events);
+            seed_clusters<<< 1, NUM_THREADS_MSTEP >>>( um_fcs_data_by_event, &(clusters_um[tid]), num_dimensions, original_num_clusters, my_num_events);
             cudaDeviceSynchronize();
             //CUT_CHECK_ERROR("Seed Kernel execution failed: ");
             
@@ -393,8 +402,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             // for each event and each cluster.
             DEBUG("Invoking E-step kernels.");
             startTimer(timers.e_step);
-            estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(d_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,my_num_events);
-            estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(d_fcs_data_by_dimension, &(clusters_um[tid]),num_dimensions,num_clusters,my_num_events, &(shared_likelihoods[tid*NUM_BLOCKS]));
+            estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,my_num_events);
+            estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(clusters_um[tid]),num_dimensions,num_clusters,my_num_events, &(shared_likelihoods[tid*NUM_BLOCKS]));
             cudaDeviceSynchronize();
             #pragma omp master
             {
@@ -455,7 +464,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 #pragma omp barrier
                 startTimer(timers.m_step);
                 dim3 gridDim1(num_clusters,num_dimensions);
-                mstep_means<<<gridDim1, NUM_THREADS_MSTEP>>>(d_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,num_clusters,my_num_events);
+                mstep_means<<<gridDim1, NUM_THREADS_MSTEP>>>(um_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,num_clusters,my_num_events);
                 cudaDeviceSynchronize();
                 stopTimer(timers.m_step);
 
@@ -490,8 +499,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 startTimer(timers.m_step);
                 // Covariance is symmetric, so we only need to compute N*(N+1)/2 matrix elements per cluster
                 dim3 gridDim2(num_clusters,num_dimensions*(num_dimensions+1)/2);
-                //mstep_covariance1<<<gridDim2, NUM_THREADS_MSTEP>>>(d_fcs_data_by_dimension,clusters_um[tid],num_dimensions,num_clusters,my_num_events);
-                mstep_covariance2<<<dim3((num_clusters+NUM_CLUSTERS_PER_BLOCK-1)/NUM_CLUSTERS_PER_BLOCK,num_dimensions*(num_dimensions+1)/2), NUM_THREADS_MSTEP>>>(d_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,num_clusters,my_num_events);
+                //mstep_covariance1<<<gridDim2, NUM_THREADS_MSTEP>>>(um_fcs_data_by_dimension,clusters_um[tid],num_dimensions,num_clusters,my_num_events);
+                mstep_covariance2<<<dim3((num_clusters+NUM_CLUSTERS_PER_BLOCK-1)/NUM_CLUSTERS_PER_BLOCK,num_dimensions*(num_dimensions+1)/2), NUM_THREADS_MSTEP>>>(um_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,num_clusters,my_num_events);
                 cudaDeviceSynchronize();
                 stopTimer(timers.m_step);
 
@@ -556,8 +565,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 DEBUG("Invoking regroup (E-step) kernel with %d blocks.\n",NUM_BLOCKS);
                 startTimer(timers.e_step);
                 // Compute new cluster membership probabilities for all the events
-                estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(d_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,my_num_events);
-                estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(d_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,num_clusters,my_num_events,&(shared_likelihoods[tid*NUM_BLOCKS]));
+                estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,my_num_events);
+                estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,num_clusters,my_num_events,&(shared_likelihoods[tid*NUM_BLOCKS]));
                 cudaDeviceSynchronize();
                 //CUT_CHECK_ERROR("E-step Kernel execution failed: ");
                 stopTimer(timers.e_step);
@@ -695,7 +704,9 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         #pragma omp master
         PRINT("\nFinal rissanen Score was: %f, with %d clusters.\n",min_rissanen,ideal_num_clusters);
         #pragma omp barrier 
-    
+
+        auto diff = std::chrono::steady_clock::now() - start;
+        PROFILING("Time execution: %ld.\n", std::chrono::duration_cast<std::chrono::microseconds>(diff).count());
         // Print some profiling information
         printf("GPU %d:\n\tE-step Kernel:\t%7.4f\t%d\t%7.4f\n\tM-step Kernel:\t%7.4f\t%d\t%7.4f\n\tConsts Kernel:\t%7.4f\t%d\t%7.4f\n\tOrder Reduce:\t%7.4f\t%d\t%7.4f\n\tGPU Memcpy:\t%7.4f\n\tCPU:\t\t%7.4f\n",tid,getTimerValue(timers.e_step) / 1000.0,regroup_iterations, (double) getTimerValue(timers.e_step) / (double) regroup_iterations / 1000.0,getTimerValue(timers.m_step) / 1000.0,params_iterations, (double) getTimerValue(timers.m_step) / (double) params_iterations / 1000.0,getTimerValue(timers.constants) / 1000.0,constants_iterations, (double) getTimerValue(timers.constants) / (double) constants_iterations / 1000.0, getTimerValue(timers.reduce) / 1000.0,reduce_iterations, (double) getTimerValue(timers.reduce) / (double) reduce_iterations / 1000.0, getTimerValue(timers.memcpy) / 1000.0, getTimerValue(timers.cpu) / 1000.0);
 
@@ -711,8 +722,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         free(scratch_cluster.memberships); 
      
         // cleanup GPU memory
-        CUDA_SAFE_CALL(cudaFree(d_fcs_data_by_event));
-        CUDA_SAFE_CALL(cudaFree(d_fcs_data_by_dimension));
+        CUDA_SAFE_CALL(cudaFree(um_fcs_data_by_event));
+        CUDA_SAFE_CALL(cudaFree(um_fcs_data_by_dimension));
     } // end of parallel block
 
 	// main thread cleanup
@@ -756,7 +767,12 @@ main( int argc, char** argv) {
     PRINT("Parsing input file...");
     // This stores the data in a 1-D array with consecutive values being the dimensions from a single event
     // (num_events by num_dimensions matrix)
+    auto start = std::chrono::steady_clock::now();
+
     float* fcs_data_by_event = readData(argv[2],&num_dimensions,&num_events);   
+
+    auto diff = std::chrono::steady_clock::now() - start;
+    PROFILING("Time read data: %ld.\n", std::chrono::duration_cast<std::chrono::microseconds>(diff).count());
 
     if(!fcs_data_by_event) {
         printf("Error parsing input file. This could be due to an empty file ");
@@ -768,8 +784,6 @@ main( int argc, char** argv) {
 
 	clusters_t saved_clusters;
 	memcpy(&saved_clusters,clusters,sizeof(clusters_t));
-
-    //cutStartTimer(timer_io);
  
     char const * result_suffix = ".results";
     char const* summary_suffix = ".summary";
@@ -839,9 +853,6 @@ main( int argc, char** argv) {
         fclose(fresults);
     }
     
-    //cutStopTimer(timer_io);
-    //cutStartTimer(timer_cpu);
-    
     // cleanup host memory
     free(fcs_data_by_event);
 
@@ -853,18 +864,6 @@ main( int argc, char** argv) {
     free(saved_clusters.R);
     free(saved_clusters.Rinv);
     free(saved_clusters.memberships);
-    
-    //cutStopTimer(timer_cpu);
-    
-    //printf( "I/O time: %f (ms)\n", cutGetTimerValue(timer_io));
-    //cutDeleteTimer(timer_io);
-    
-    //printf( "Main Thread CPU time: %f (ms)\n", cutGetTimerValue(timer_cpu));
-    //cutDeleteTimer(timer_cpu);
-
-    //cutStopTimer(timer_total);
-    //printf( "Total time: %f (ms)\n", cutGetTimerValue(timer_total));
-    //cutDeleteTimer(timer_total);
 
     return 0;
 }
