@@ -17,7 +17,7 @@
 #include <math.h>
 #include <time.h> // for clock(), clock_t, CLOCKS_PER_SEC
 #include <omp.h>
-
+#include <chrono> 
 // includes, project
 #include "gaussian.h"
 #include "invert_matrix.h"
@@ -144,6 +144,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 	int ideal_num_clusters;
 	int stop_number;
 
+    auto start1 = std::chrono::steady_clock::now();
+
 	// Number of clusters to stop iterating at.
     if(desired_num_clusters == 0) {
         stop_number = 1;
@@ -180,7 +182,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 
     //cutStopTimer(timer_io);
     //cutStartTimer(timer_cpu);
-   
+
     PRINT("Number of events: %d\n",num_events);
     PRINT("Number of dimensions: %d\n\n",num_dimensions);
     PRINT("Starting with %d cluster(s), will stop at %d cluster(s).\n",original_num_clusters,stop_number);
@@ -230,11 +232,14 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
     float min_rissanen;
     
     //cutStopTimer( timer_cpu);
-
+    auto diff1 = std::chrono::steady_clock::now() - start1;
+    PROFILING("##### Time allocation on Host (before splitting): %ld micro sec. #####\n", std::chrono::duration_cast<std::chrono::microseconds>(diff1).count());
+    
     // Main thread splits into one thread per GPU at this point
     omp_set_num_threads(num_gpus);
     #pragma omp parallel shared(clusters,fcs_data_by_event,fcs_data_by_dimension,shared_likelihoods,likelihood,old_likelihood,ideal_num_clusters,min_rissanen,regroup_iterations) 
     {
+        auto start2 = std::chrono::steady_clock::now();
         // Set the device for this thread
         unsigned int tid  = omp_get_thread_num();
         unsigned int num_cpu_threads = omp_get_num_threads();
@@ -322,9 +327,14 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         free(temp_fcs_data);
  
         DEBUG("GPU %d: Finished copying FCS data to device.\n",tid);
-        stopTimer(timers.memcpy);
+
+        auto diff2 = std::chrono::steady_clock::now() - start2;
+        PROFILING("##### Time allocation on device %d (after splitting): %ld micro sec. #####\n",tid, std::chrono::duration_cast<std::chrono::microseconds>(diff2).count());
         
+        stopTimer(timers.memcpy);
         //////////////// Initialization done, starting kernels //////////////// 
+        auto start3 = std::chrono::steady_clock::now();
+
         DEBUG("Invoking seed_clusters kernel.\n");
 
         // seed_clusters sets initial pi values, 
@@ -799,7 +809,10 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         #pragma omp master
         PRINT("\nFinal rissanen Score was: %f, with %d clusters.\n",min_rissanen,ideal_num_clusters);
         #pragma omp barrier 
-    
+
+        auto diff3 = std::chrono::steady_clock::now() - start3;
+        PROFILING("##### Time execution on device %d: %ld micro sec. #####\n", tid, std::chrono::duration_cast<std::chrono::microseconds>(diff3).count());
+        
         // Print some profiling information
         printf("GPU %d:\n\tE-step Kernel:\t%7.4f\t%d\t%7.4f\n\tM-step Kernel:\t%7.4f\t%d\t%7.4f\n\tConsts Kernel:\t%7.4f\t%d\t%7.4f\n\tOrder Reduce:\t%7.4f\t%d\t%7.4f\n\tGPU Memcpy:\t%7.4f\n\tCPU:\t\t%7.4f\n",tid,getTimerValue(timers.e_step) / 1000.0,regroup_iterations, (double) getTimerValue(timers.e_step) / (double) regroup_iterations / 1000.0,getTimerValue(timers.m_step) / 1000.0,params_iterations, (double) getTimerValue(timers.m_step) / (double) params_iterations / 1000.0,getTimerValue(timers.constants) / 1000.0,constants_iterations, (double) getTimerValue(timers.constants) / (double) constants_iterations / 1000.0, getTimerValue(timers.reduce) / 1000.0,reduce_iterations, (double) getTimerValue(timers.reduce) / (double) reduce_iterations / 1000.0, getTimerValue(timers.memcpy) / 1000.0, getTimerValue(timers.cpu) / 1000.0);
 
@@ -873,7 +886,12 @@ main( int argc, char** argv) {
     PRINT("Parsing input file...");
     // This stores the data in a 1-D array with consecutive values being the dimensions from a single event
     // (num_events by num_dimensions matrix)
+
+    auto start0 = std::chrono::steady_clock::now();
+
     float* fcs_data_by_event = readData(argv[2],&num_dimensions,&num_events);   
+
+
 
     if(!fcs_data_by_event) {
         printf("Error parsing input file. This could be due to an empty file ");
@@ -886,6 +904,8 @@ main( int argc, char** argv) {
 	clusters_t saved_clusters;
 	memcpy(&saved_clusters,clusters,sizeof(clusters_t));
 
+    auto diff0 = std::chrono::steady_clock::now() - start0;
+    PROFILING("##### Time overall: %ld micro sec. #####\n", std::chrono::duration_cast<std::chrono::microseconds>(diff0).count());
     //cutStartTimer(timer_io);
  
     char const * result_suffix = ".results";
