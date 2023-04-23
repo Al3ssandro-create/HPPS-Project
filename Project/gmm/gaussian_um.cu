@@ -242,6 +242,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
     #pragma omp parallel shared(clusters_um, fcs_data_by_event, fcs_data_by_dimension, shared_likelihoods, likelihood, old_likelihood, ideal_num_clusters, min_rissanen, regroup_iterations) 
     {
         auto start2 = std::chrono::steady_clock::now();
+
         // Set the device for this thread
         unsigned int tid  = omp_get_thread_num();
         unsigned int num_cpu_threads = omp_get_num_threads();
@@ -250,6 +251,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         cudaDeviceProp prop;
         cudaGetDeviceProperties(&prop, tid);
         printf("CPU thread %d (of %d) using device %d: %s\n", tid, num_gpus, tid, prop.name);
+
+        cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseSetPreferredLocation, tid);
         
         // Timers for profiling
         //  timers use cuda events (which require a cuda context),
@@ -300,7 +303,9 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         mempcpy(um_fcs_data_by_dimension,temp_fcs_data,mem_size);
         cudaDeviceSynchronize();
         free(temp_fcs_data);
- 
+
+        cudaMemAdvise(um_fcs_data_by_dimension, mem_size, cudaMemAdviseSetReadMostly , cudaCpuDeviceId);
+
         DEBUG("GPU %d: Finished copying FCS data to device.\n",tid);
 
         // #pragma omp barrier
@@ -311,7 +316,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         auto start3 = std::chrono::steady_clock::now();
 
         DEBUG("Invoking seed_clusters kernel.\n");
-
         // seed_clusters sets initial pi values, 
         // finds the means / covariances and copies it to all the clusters
         // TODO: Does it make any sense to use multiple blocks for this?
@@ -329,7 +333,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             
             DEBUG("Invoking constants kernel.\n");
             // Computes the R matrix inverses, and the gaussian constant
-            constants_kernel<<<original_num_clusters, NUM_THREADS_MSTEP>>>(&(clusters_um[tid]), original_num_clusters, num_dimensions);
+            cudaMemPrefetchAsync(&(clusters_um[tid]), sizeof(clusters_t), tid);
             constants_iterations++;
             cudaDeviceSynchronize();
             //CUT_CHECK_ERROR("Constants Kernel execution failed: ");
@@ -565,7 +569,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 DEBUG("Invoking regroup (E-step) kernel with %d blocks.\n",NUM_BLOCKS);
                 startTimer(timers.e_step);
                 // Compute new cluster membership probabilities for all the events
-                cudaMemAdvise(um_fcs_data_by_dimension, mem_size, cudaMemAdviseSetReadMostly , cudaCpuDeviceId);
                 estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(clusters_um[tid]), num_dimensions,my_num_events);
                 estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,num_clusters,my_num_events,&(shared_likelihoods[tid*NUM_BLOCKS]));
                 cudaDeviceSynchronize();
