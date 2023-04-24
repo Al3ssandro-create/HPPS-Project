@@ -251,8 +251,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         cudaDeviceProp prop;
         cudaGetDeviceProperties(&prop, tid);
         printf("CPU thread %d (of %d) using device %d: %s\n", tid, num_gpus, tid, prop.name);
-
-        cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseSetPreferredLocation, tid);
         
         // Timers for profiling
         //  timers use cuda events (which require a cuda context),
@@ -333,7 +331,9 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             
             DEBUG("Invoking constants kernel.\n");
             // Computes the R matrix inverses, and the gaussian constant
-            cudaMemPrefetchAsync(&(clusters_um[tid]), sizeof(clusters_t), tid);
+            cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseSetPreferredLocation, cudaCpuDeviceId);
+            constants_kernel<<<original_num_clusters, NUM_THREADS_MSTEP>>>(&(clusters_um[tid]), original_num_clusters, num_dimensions);
+            cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseUnsetPreferredLocation, cudaCpuDeviceId);
             constants_iterations++;
             cudaDeviceSynchronize();
             //CUT_CHECK_ERROR("Constants Kernel execution failed: ");
@@ -378,6 +378,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         // synchronize after first gpu does the seeding, copy result to all gpus
         #pragma omp barrier
 
+        cudaMemPrefetchAsync(&(clusters_um[tid]), sizeof(clusters_t), tid);
+
         startTimer(timers.cpu); 
         // Calculate an epsilon value
         //int ndata_points = num_events*num_dimensions;
@@ -406,8 +408,11 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             // for each event and each cluster.
             DEBUG("Invoking E-step kernels.");
             startTimer(timers.e_step);
-            estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,my_num_events);
-            estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(clusters_um[tid]),num_dimensions,num_clusters,my_num_events, &(shared_likelihoods[tid*NUM_BLOCKS]));
+            cudaMemPrefetchAsync(um_fcs_data_by_dimension, mem_size, tid);
+            estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(clusters_um[tid]), num_dimensions,my_num_events);
+            cudaMemAdvise(&(shared_likelihoods[tid*NUM_BLOCKS]), sizeof(float)*NUM_BLOCKS, cudaMemAdviseSetAccessedBy, tid);
+            estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(clusters_um[tid]), num_dimensions, num_clusters,my_num_events, &(shared_likelihoods[tid*NUM_BLOCKS]));
+            cudaMemAdvise(&(shared_likelihoods[tid*NUM_BLOCKS]), sizeof(float)*NUM_BLOCKS, cudaMemAdviseUnsetAccessedBy, tid);
             cudaDeviceSynchronize();
             #pragma omp master
             {
@@ -504,7 +509,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 // Covariance is symmetric, so we only need to compute N*(N+1)/2 matrix elements per cluster
                 dim3 gridDim2(num_clusters,num_dimensions*(num_dimensions+1)/2);
                 //mstep_covariance1<<<gridDim2, NUM_THREADS_MSTEP>>>(um_fcs_data_by_dimension,clusters_um[tid],num_dimensions,num_clusters,my_num_events);
-                mstep_covariance2<<<dim3((num_clusters+NUM_CLUSTERS_PER_BLOCK-1)/NUM_CLUSTERS_PER_BLOCK,num_dimensions*(num_dimensions+1)/2), NUM_THREADS_MSTEP>>>(um_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,num_clusters,my_num_events);
+                mstep_covariance2<<<dim3((num_clusters+NUM_CLUSTERS_PER_BLOCK-1)/NUM_CLUSTERS_PER_BLOCK,num_dimensions*(num_dimensions+1)/2), NUM_THREADS_MSTEP>>>(um_fcs_data_by_dimension, &(clusters_um[tid]), num_dimensions, num_clusters, my_num_events);
                 cudaDeviceSynchronize();
                 stopTimer(timers.m_step);
 
@@ -551,7 +556,9 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 DEBUG("Invoking constants kernel.");
                 // Inverts the R matrices, computes the constant, normalizes cluster probabilities
                 startTimer(timers.constants);
+                cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseSetPreferredLocation, cudaCpuDeviceId);
                 constants_kernel<<<num_clusters, NUM_THREADS_MSTEP>>>(&(clusters_um[tid]),num_clusters,num_dimensions);
+                cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseUnsetPreferredLocation, cudaCpuDeviceId);
                 cudaDeviceSynchronize();
             
                 #pragma omp master 
@@ -570,7 +577,10 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 startTimer(timers.e_step);
                 // Compute new cluster membership probabilities for all the events
                 estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(clusters_um[tid]), num_dimensions,my_num_events);
-                estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,num_clusters,my_num_events,&(shared_likelihoods[tid*NUM_BLOCKS]));
+                cudaDeviceSynchronize();
+                cudaMemAdvise(&(shared_likelihoods[tid*NUM_BLOCKS]), sizeof(float)*NUM_BLOCKS, cudaMemAdviseSetAccessedBy, tid);
+                estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(clusters_um[tid]), num_dimensions, num_clusters, my_num_events, &(shared_likelihoods[tid*NUM_BLOCKS]));
+                cudaMemAdvise(&(shared_likelihoods[tid*NUM_BLOCKS]), sizeof(float)*NUM_BLOCKS, cudaMemAdviseUnsetAccessedBy, tid);
                 cudaDeviceSynchronize();
                 //CUT_CHECK_ERROR("E-step Kernel execution failed: ");
                 stopTimer(timers.e_step);
