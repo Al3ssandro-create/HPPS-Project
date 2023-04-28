@@ -206,11 +206,13 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
     }
     
     // Only need one copy of all the memberships
-    CUDA_SAFE_CALL(cudaMallocManaged(&(clusters_um[0].memberships), sizeof(float)*num_events*original_num_clusters*2));
-    if(!clusters_um[0].memberships) {
-        printf("ERROR: Could not allocate memory for clusters.\n"); 
-        return NULL; 
-    }
+    // CUDA_SAFE_CALL(cudaMallocManaged(&(clusters_um[0].memberships), sizeof(float)*num_events*original_num_clusters*2));
+    // if(!clusters_um[0].memberships) {
+    //     printf("ERROR: Could not allocate memory for clusters.\n"); 
+    //     return NULL; 
+    // }
+
+    float* special_memberships = (float*) malloc(sizeof(float)*num_events*original_num_clusters*2);
     
     // Declare another set of clusters for saving the results of the best configuration
     clusters_t* saved_clusters = (clusters_t*) malloc(sizeof(clusters_t));
@@ -283,7 +285,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 
         DEBUG("GPU %d will handle %d events\n",tid,my_num_events); 
 
-        if (tid != 0) CUDA_SAFE_CALL(cudaMallocManaged(&(clusters_um[tid].memberships), sizeof(float)*my_num_events*(original_num_clusters+NUM_CLUSTERS_PER_BLOCK-original_num_clusters % NUM_CLUSTERS_PER_BLOCK)));
+        CUDA_SAFE_CALL(cudaMallocManaged(&(clusters_um[tid].memberships), sizeof(float)*my_num_events*(original_num_clusters+NUM_CLUSTERS_PER_BLOCK-original_num_clusters % NUM_CLUSTERS_PER_BLOCK)*2));
 
         // allocate device memory for FCS data
         float* um_fcs_data_by_event;
@@ -302,7 +304,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         for(int d=0; d < num_dimensions; d++) {
             memcpy(&temp_fcs_data[d*my_num_events],&fcs_data_by_dimension[d*num_events + tid*events_per_gpu],sizeof(float)*my_num_events);
         }
-        if (tid != 0) memcpy(um_fcs_data_by_dimension, temp_fcs_data, mem_size);
+        memcpy(um_fcs_data_by_dimension, temp_fcs_data, mem_size);
         cudaDeviceSynchronize();
         free(temp_fcs_data);
 
@@ -342,7 +344,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             cudaDeviceSynchronize();
             //CUT_CHECK_ERROR("Constants Kernel execution failed: ");
             stopTimer(timers.constants);
-
             startTimer(timers.cpu);
             seed_clusters(&clusters_um[0],fcs_data_by_event,original_num_clusters,num_dimensions,num_events);
             DEBUG("Starting Clusters\n");
@@ -391,9 +392,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             memcpy(clusters_um[tid].Rinv, clusters_um[0].Rinv, sizeof(float)*num_dimensions*num_dimensions*original_num_clusters);
         }
         cudaDeviceSynchronize();
-
         cudaMemPrefetchAsync(&(clusters_um[tid]), sizeof(clusters_t), tid);
-
         startTimer(timers.cpu); 
         // Calculate an epsilon value
         //int ndata_points = num_events*num_dimensions;
@@ -403,6 +402,9 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         //epsilon = 1e-6;
         #pragma omp master
         PRINT("Gaussian.cu: epsilon = %f\n",epsilon);
+
+        // float* likelihoods_um;
+        // CUDA_SAFE_CALL(cudaMallocManaged(&likelihoods_um, sizeof(float)*NUM_BLOCKS));
         
         // Variables for GMM reduce order
         float distance, min_distance = 0.0;
@@ -413,10 +415,9 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         startTimer(timers.memcpy);
         CUDA_SAFE_CALL(cudaMallocManaged(&c_um, sizeof(float)));
         stopTimer(timers.memcpy);
-         
+        
         for(int num_clusters=original_num_clusters; num_clusters >= stop_number; num_clusters--) {
-            /*************** EM ALGORITHM *****************************/
-            
+            /*************** EM ALGORITHM *****************************/    
             // do initial E-step
             // Calculates a cluster membership probability
             // for each event and each cluster.
@@ -442,15 +443,15 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             #pragma omp master
             {
                 likelihood = 0.0;
-                for(int i=0;i<NUM_BLOCKS*num_gpus;i++) {
+                for(int i=0; i<NUM_BLOCKS*num_gpus; i++) {
                     likelihood += shared_likelihoods[i]; 
                 }
-                DEBUG("Likelihood: %e\n",likelihood);
+                DEBUG("Likelihood: %e\n", likelihood);
             }
             #pragma omp barrier
             stopTimer(timers.cpu); 
 
-            float change = epsilon*2;
+            float change = epsilon * 2;
             
             #pragma omp master
             PRINT("Performing EM algorithm on %d clusters.\n", num_clusters);
@@ -466,11 +467,13 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 
                 DEBUG("Invoking reestimate_parameters (M-step) kernel.");
                 startTimer(timers.m_step);
+                PRINT("1:[tid:%d]clusters_um.membership: %f\n", tid, clusters_um[tid].memberships[5]);
                 // This kernel computes a new N, pi isn't updated until compute_constants though
                 mstep_N<<<num_clusters, NUM_THREADS_MSTEP>>>(&(clusters_um[tid]),num_dimensions,num_clusters,my_num_events);
+                // PRINT("1:[tid:%d]clusters_um.N: %f\n",tid,*clusters_um[tid].N);
                 cudaDeviceSynchronize();
                 stopTimer(timers.m_step);
-                
+                //if(tid == 0)PRINT("1:[tid:%d]cluster_um.N: %f\n",tid,*clusters_um[tid].N);
                 // TODO: figure out the omp reduction pragma...
                 // Reduce N for all clusters, copy back to device
                 #pragma omp barrier
@@ -486,12 +489,12 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 }
                 #pragma omp barrier
 
-                if (tid != 0) memcpy(clusters_um[tid].N, clusters_um[0].N, sizeof(float)*num_clusters);
+                memcpy(clusters_um[tid].N, clusters_um[0].N, sizeof(float)*num_clusters);
                 cudaDeviceSynchronize();
 
                 startTimer(timers.m_step);
                 dim3 gridDim1(num_clusters,num_dimensions);
-                mstep_means<<<gridDim1, NUM_THREADS_MSTEP>>>(um_fcs_data_by_dimension,&(clusters_um[tid]),num_dimensions,num_clusters,my_num_events);
+                mstep_means<<<gridDim1, NUM_THREADS_MSTEP>>>(um_fcs_data_by_dimension, &(clusters_um[tid]), num_dimensions, num_clusters, my_num_events);
                 cudaDeviceSynchronize();
                 stopTimer(timers.m_step);
 
@@ -523,8 +526,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 #pragma omp barrier
                 stopTimer(timers.cpu);
                 
-                
-                if (tid != 0) memcpy(clusters_um[tid].means, clusters_um[0].means, sizeof(float)*num_clusters*num_dimensions);
+                memcpy(clusters_um[tid].means, clusters_um[0].means, sizeof(float)*num_clusters*num_dimensions);
                 cudaDeviceSynchronize();
 
                 startTimer(timers.m_step);
@@ -568,7 +570,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 #pragma omp barrier
                 stopTimer(timers.cpu);
 
-                if (tid != 0) memcpy(clusters_um[tid].R, clusters_um[0].R, sizeof(float)*num_clusters*num_dimensions*num_dimensions);
+                memcpy(clusters_um[tid].R, clusters_um[0].R, sizeof(float)*num_clusters*num_dimensions*num_dimensions);
                 cudaDeviceSynchronize();
                 //CUT_CHECK_ERROR("M-step Kernel execution failed: ");
                 #pragma omp master
@@ -580,7 +582,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 // Inverts the R matrices, computes the constant, normalizes cluster probabilities
                 startTimer(timers.constants);
                 cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseSetPreferredLocation, cudaCpuDeviceId);
-                constants_kernel<<<num_clusters, NUM_THREADS_MSTEP>>>(&(clusters_um[tid]),num_clusters,num_dimensions);
+                constants_kernel<<<num_clusters, NUM_THREADS_MSTEP>>>(&(clusters_um[tid]), num_clusters, num_dimensions);
                 cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseUnsetPreferredLocation, cudaCpuDeviceId);
                 cudaDeviceSynchronize();
             
@@ -638,8 +640,10 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             DEBUG("GPU %d done with EM loop\n",tid);
             
             startTimer(timers.cpu);
+
+            // memcpy(temp_memberships, clusters_um[tid].memberships, sizeof(float)*my_num_events*num_clusters*2);
             for(int c=0; c < num_clusters; c++) {
-                memcpy(&(clusters_um[0].memberships[c*num_events+tid*events_per_gpu]),&(clusters_um[tid].memberships[c*my_num_events]),sizeof(float)*my_num_events);
+                memcpy(&(special_memberships[c*num_events+tid*events_per_gpu]), &(clusters_um[tid].memberships[c*my_num_events]), sizeof(float)*my_num_events*2);
             }
             #pragma omp barrier
             DEBUG("GPU %d done with copying cluster data from device\n",tid); 
@@ -668,7 +672,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                     memcpy(saved_clusters->means,clusters_um[0].means,sizeof(float)*num_dimensions*num_clusters);
                     memcpy(saved_clusters->R,clusters_um[0].R,sizeof(float)*num_dimensions*num_dimensions*num_clusters);
                     memcpy(saved_clusters->Rinv,clusters_um[0].Rinv,sizeof(float)*num_dimensions*num_dimensions*num_clusters);
-                    memcpy(saved_clusters->memberships,clusters_um[0].memberships,sizeof(float)*num_events*num_clusters);
+                    memcpy(saved_clusters->memberships,special_memberships,sizeof(float)*num_events*num_clusters*2);
                 }
             }
             #pragma omp barrier
@@ -725,8 +729,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                     }
                 }
                 stopTimer(timers.cpu);
-
                 #pragma omp barrier
+
                 if (tid !=0 ) {
                     memcpy(clusters_um[tid].N, clusters_um[0].N, sizeof(float)*original_num_clusters);
                     memcpy(clusters_um[tid].pi, clusters_um[0].pi, sizeof(float)*original_num_clusters);
@@ -738,6 +742,12 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 }
                 cudaDeviceSynchronize();
 
+                startTimer(timers.cpu);
+                for(int c=0; c < num_clusters; c++) {
+                    memcpy(&(clusters_um[tid].memberships[c*my_num_events]), &(special_memberships[c*num_events+tid*(num_events/num_gpus)]), sizeof(float)*my_num_events*2);
+                }
+                memcpy(clusters_um[tid].memberships, clusters_um[tid].memberships, sizeof(float)*my_num_events*num_clusters*2);
+                cudaDeviceSynchronize();
             } // GMM reduction block 
             stopTimer(timers.reduce);
             #pragma omp master
