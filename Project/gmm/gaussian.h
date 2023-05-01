@@ -49,7 +49,7 @@
 
 // Used to enable regular print outs (such as the Rissanen scores, clustering results)
 // This should be enabled for general use and disabled for performance evaluations only
-#define ENABLE_PRINT 1
+#define ENABLE_PRINT 0
 
 // Used to enable print time profiling
 // This should be enabled for performance evaluations only
@@ -57,7 +57,7 @@
 
 // Used to enable output of cluster results to .results and .summary files
 // Disable for performance testing
-#define ENABLE_OUTPUT 1
+#define ENABLE_OUTPUT 0
 
 // Used to enable EMUPRINT macro, this can only be used when compiled for
 // in emulation mode. It is used to print out during cuda kernels
