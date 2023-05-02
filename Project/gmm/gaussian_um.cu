@@ -204,6 +204,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             return NULL; 
         }
     }
+
+
     
     // Only need one copy of all the memberships
     // CUDA_SAFE_CALL(cudaMallocManaged(&(clusters_um[0].memberships), sizeof(float)*num_events*original_num_clusters*2));
@@ -297,7 +299,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         CUDA_SAFE_CALL(cudaMallocManaged(&um_fcs_data_by_dimension, mem_size));
         
         memcpy(um_fcs_data_by_event, &fcs_data_by_event[num_dimensions*events_per_gpu*tid], mem_size);
-        cudaDeviceSynchronize();
 
         // Copying the transposed data is trickier since it's not all contigious for the relavant events
         float* temp_fcs_data = (float*) malloc(mem_size);
@@ -309,7 +310,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         free(temp_fcs_data);
 
         cudaMemAdvise(um_fcs_data_by_dimension, mem_size, cudaMemAdviseSetReadMostly , cudaCpuDeviceId);
-        cudaMemPrefetchAsync(&(um_fcs_data_by_dimension), mem_size, tid);
+        // cudaMemPrefetchAsync(&(um_fcs_data_by_dimension), mem_size, tid);
 
         DEBUG("GPU %d: Finished copying FCS data to device.\n",tid);
 
@@ -332,7 +333,13 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             //  Only tricky part is how to do average variance? 
             //  Make a kernel for that and reduce on host like the means/covariance?
             startTimer(timers.constants);
+            // cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseSetPreferredLocation, tid);
+            // cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseSetReadMostly, tid);
+            // cudaMemAdvise(fcs_data_by_event, mem_size, cudaMemAdviseSetPreferredLocation, tid);
             seed_clusters<<< 1, NUM_THREADS_MSTEP >>>( um_fcs_data_by_event, &(clusters_um[tid]), num_dimensions, original_num_clusters, my_num_events);
+            // cudaMemAdvise(fcs_data_by_event, mem_size, cudaMemAdviseUnsetPreferredLocation, tid);
+            // cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseUnsetPreferredLocation, tid);
+            // cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseUnsetReadMostly, tid);
             cudaDeviceSynchronize();
             //CUT_CHECK_ERROR("Seed Kernel execution failed: ");
             
@@ -382,6 +389,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         }
 
         // synchronize after first gpu does the seeding, copy result to all gpus
+        
         #pragma omp barrier
         if (tid !=0 ) {
             memcpy(clusters_um[tid].N, clusters_um[0].N, sizeof(float)*original_num_clusters);
@@ -392,8 +400,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             memcpy(clusters_um[tid].R, clusters_um[0].R, sizeof(float)*num_dimensions*num_dimensions*original_num_clusters);
             memcpy(clusters_um[tid].Rinv, clusters_um[0].Rinv, sizeof(float)*num_dimensions*num_dimensions*original_num_clusters);
         }
-        cudaDeviceSynchronize();
-        cudaMemPrefetchAsync(&(clusters_um[tid]), sizeof(clusters_t), tid);
+
+        // cudaMemPrefetchAsync(&(clusters_um[tid]), sizeof(clusters_t), tid);
         startTimer(timers.cpu); 
         // Calculate an epsilon value
         //int ndata_points = num_events*num_dimensions;
@@ -414,6 +422,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         CUDA_SAFE_CALL(cudaMallocManaged(&c_um, sizeof(float)));
         stopTimer(timers.memcpy);
         
+        // cudaMemPrefetchAsync(&clusters_um[tid], sizeof(clusters_um), tid);
+        // cudaMemAdvise(&clusters_um[tid], sizeof(clusters_um), cudaMemAdviseSetReadMostly, cudaCpuDeviceId);
         for(int num_clusters=original_num_clusters; num_clusters >= stop_number; num_clusters--) {
             /*************** EM ALGORITHM *****************************/    
             // do initial E-step
@@ -421,10 +431,10 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             // for each event and each cluster.
             DEBUG("Invoking E-step kernels.");
             startTimer(timers.e_step);
-            // cudaMemPrefetchAsync(um_fcs_data_by_dimension, mem_size, tid);
-            cudaMemAdvise(&(clusters_um[tid].memberships), sizeof(float)*my_num_events*(original_num_clusters+NUM_CLUSTERS_PER_BLOCK-original_num_clusters % NUM_CLUSTERS_PER_BLOCK)*2, cudaMemAdviseSetPreferredLocation, cudaCpuDeviceId);
+            cudaMemPrefetchAsync(um_fcs_data_by_dimension, mem_size, tid);
+            cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_um), cudaMemAdviseSetAccessedBy, tid);
             estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(clusters_um[tid]), num_dimensions, my_num_events);
-            cudaMemAdvise(&(clusters_um[tid].memberships), sizeof(float)*my_num_events*(original_num_clusters+NUM_CLUSTERS_PER_BLOCK-original_num_clusters % NUM_CLUSTERS_PER_BLOCK)*2, cudaMemAdviseUnsetPreferredLocation, cudaCpuDeviceId);
+            cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_um), cudaMemAdviseUnsetAccessedBy, tid);
             cudaMemAdvise(&(shared_likelihoods[tid*NUM_BLOCKS]), sizeof(float)*NUM_BLOCKS, cudaMemAdviseSetAccessedBy, tid);
             estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(clusters_um[tid]), num_dimensions, num_clusters, my_num_events, &(shared_likelihoods[tid*NUM_BLOCKS]));
             cudaMemAdvise(&(shared_likelihoods[tid*NUM_BLOCKS]), sizeof(float)*NUM_BLOCKS, cudaMemAdviseUnsetAccessedBy, tid);
@@ -524,13 +534,14 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 stopTimer(timers.cpu);
                 
                 memcpy(clusters_um[tid].means, clusters_um[0].means, sizeof(float)*num_clusters*num_dimensions);
-                cudaDeviceSynchronize();
 
                 startTimer(timers.m_step);
                 // Covariance is symmetric, so we only need to compute N*(N+1)/2 matrix elements per cluster
                 dim3 gridDim2(num_clusters,num_dimensions*(num_dimensions+1)/2);
                 //mstep_covariance1<<<gridDim2, NUM_THREADS_MSTEP>>>(um_fcs_data_by_dimension,clusters_um[tid],num_dimensions,num_clusters,my_num_events);
+                // cudaMemAdvise(fcs_data_by_dimension, mem_size, cudaMemAdviseSetReadMostly, cudaCpuDeviceId);
                 mstep_covariance2<<<dim3((num_clusters+NUM_CLUSTERS_PER_BLOCK-1)/NUM_CLUSTERS_PER_BLOCK,num_dimensions*(num_dimensions+1)/2), NUM_THREADS_MSTEP>>>(um_fcs_data_by_dimension, &(clusters_um[tid]), num_dimensions, num_clusters, my_num_events);
+                // cudaMemAdvise(fcs_data_by_dimension, mem_size, cudaMemAdviseUnsetReadMostly, cudaCpuDeviceId);
                 cudaDeviceSynchronize();
                 stopTimer(timers.m_step);
 
@@ -578,9 +589,9 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 DEBUG("Invoking constants kernel.");
                 // Inverts the R matrices, computes the constant, normalizes cluster probabilities
                 startTimer(timers.constants);
-                // cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseSetPreferredLocation, cudaCpuDeviceId);
+                cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseSetPreferredLocation, cudaCpuDeviceId);
                 constants_kernel<<<num_clusters, NUM_THREADS_MSTEP>>>(&(clusters_um[tid]), num_clusters, num_dimensions);
-                // cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseUnsetPreferredLocation, cudaCpuDeviceId);
+                cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseUnsetPreferredLocation, cudaCpuDeviceId);
                 cudaDeviceSynchronize();
             
                 #pragma omp master 
@@ -738,14 +749,12 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                     memcpy(clusters_um[tid].R, clusters_um[0].R, sizeof(float)*num_dimensions*num_dimensions*original_num_clusters);
                     memcpy(clusters_um[tid].Rinv, clusters_um[0].Rinv, sizeof(float)*num_dimensions*num_dimensions*original_num_clusters);
                 }
-                cudaDeviceSynchronize();
 
                 startTimer(timers.cpu);
                 for(int c=0; c < num_clusters; c++) {
                     memcpy(&(clusters_um[tid].memberships[c*my_num_events]), &(special_memberships[c*num_events+tid*(num_events/num_gpus)]), sizeof(float)*my_num_events*2);
                 }
                 memcpy(clusters_um[tid].memberships, clusters_um[tid].memberships, sizeof(float)*my_num_events*num_clusters*2);
-                cudaDeviceSynchronize();
             } // GMM reduction block 
             stopTimer(timers.reduce);
             #pragma omp master
