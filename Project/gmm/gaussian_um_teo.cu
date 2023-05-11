@@ -276,10 +276,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[tid].memberships), sizeof(float)*my_num_events*(original_num_clusters+NUM_CLUSTERS_PER_BLOCK-original_num_clusters % NUM_CLUSTERS_PER_BLOCK)));
        
         // Allocate a struct on the device 
-        DEBUG("Finished allocating memory on device for clusters.\n");
-
-        // Temporary array, holds memberships from device before putting it in the shared clusters.memberships        
-        float* temp_memberships = (float*) malloc(sizeof(float)*my_num_events*original_num_clusters);
+        DEBUG("Finished allocating memory on device for clusters.\n");      
 
         // allocate device memory for FCS data
         float* um_fcs_data_by_event;
@@ -613,11 +610,10 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             
             startTimer(timers.memcpy);
            
-            memcpy(temp_memberships, um_clusters[tid].memberships, sizeof(float)*my_num_events*num_clusters);
             stopTimer(timers.memcpy);
             startTimer(timers.cpu);
             for(int c=0; c < num_clusters; c++) {
-                memcpy(&(special_memberships[c*num_events+tid*events_per_gpu]), &(temp_memberships[c*my_num_events]),sizeof(float)*my_num_events);
+                memcpy(&(special_memberships[c*num_events+tid*events_per_gpu]), &(um_clusters[tid].memberships[c*my_num_events]),sizeof(float)*my_num_events);
             }
             #pragma omp barrier
             DEBUG("GPU %d done with copying cluster data from device\n",tid); 
@@ -718,12 +714,9 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 
                 startTimer(timers.cpu);
                 for(int c=0; c < num_clusters; c++) {
-                    memcpy(&temp_memberships[c*my_num_events], &(special_memberships[c*num_events+tid*(num_events/num_gpus)]),sizeof(float)*my_num_events);
+                    memcpy(&um_clusters[tid].memberships[c*my_num_events], &(special_memberships[c*num_events+tid*(num_events/num_gpus)]),sizeof(float)*my_num_events);
                 }
                 stopTimer(timers.cpu);
-                startTimer(timers.memcpy);
-                memcpy(um_clusters[tid].memberships, temp_memberships, sizeof(float)*my_num_events*num_clusters);
-                stopTimer(timers.memcpy);
             } // GMM reduction block 
             stopTimer(timers.reduce);
             #pragma omp master
@@ -753,8 +746,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         free(scratch_cluster.R);
         free(scratch_cluster.Rinv);
         free(scratch_cluster.memberships);
-        free(temp_memberships);   
-     
+             
         // cleanup GPU memory
      
         CUDA_SAFE_CALL(cudaFree(um_fcs_data_by_event));
