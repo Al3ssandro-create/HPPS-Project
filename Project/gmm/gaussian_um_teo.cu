@@ -226,7 +226,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
     DEBUG("Finished allocating shared cluster structures on host\n");
         
     // Used to hold the result from regroup kernel
-    float* shared_likelihoods = (float*) malloc(sizeof(float)*NUM_BLOCKS*num_gpus);
+    float* shared_likelihoods;
+    CUDA_SAFE_CALL(cudaMallocManaged(&shared_likelihoods, sizeof(float)*NUM_BLOCKS*num_gpus));
     float likelihood, old_likelihood;
     float min_rissanen;
     
@@ -411,9 +412,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         //epsilon = 1e-6;
         #pragma omp master
         PRINT("Gaussian.cu: epsilon = %f\n",epsilon);
-
-        float* um_likelihoods;
-        CUDA_SAFE_CALL(cudaMallocManaged(&um_likelihoods, sizeof(float)*NUM_BLOCKS));
         
         // Variables for GMM reduce order
         float distance, min_distance = 0.0;
@@ -433,7 +431,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             DEBUG("Invoking E-step kernels.");
             startTimer(timers.e_step);
             estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, um_clusters, num_dimensions, my_num_events);
-            estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, um_clusters, num_dimensions, num_clusters, my_num_events, um_likelihoods);
+            estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, um_clusters, num_dimensions, num_clusters, my_num_events, &shared_likelihoods[tid*NUM_BLOCKS]);
             cudaDeviceSynchronize();
             #pragma omp master
             {
@@ -442,11 +440,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             // check if kernel execution generated an error
             //CUT_CHECK_ERROR("Kernel execution failed");
             stopTimer(timers.e_step);
-
-            // Copy the likelihood totals from each block, sum them up to get a total
-            startTimer(timers.memcpy);
-            memcpy(&shared_likelihoods[tid*NUM_BLOCKS], um_likelihoods,sizeof(float)*NUM_BLOCKS);
-            stopTimer(timers.memcpy);
 
             #pragma omp barrier
             startTimer(timers.cpu); 
@@ -622,7 +615,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 startTimer(timers.e_step);
                 // Compute new cluster membership probabilities for all the events
                 estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, um_clusters, num_dimensions, my_num_events);
-                estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, um_clusters, num_dimensions, num_clusters, my_num_events, um_likelihoods);
+                estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, um_clusters, num_dimensions, num_clusters, my_num_events, &shared_likelihoods[tid*NUM_BLOCKS]);
                 cudaDeviceSynchronize();
                 //CUT_CHECK_ERROR("E-step Kernel execution failed: ");
                 stopTimer(timers.e_step);
@@ -633,11 +626,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             
                 // check if kernel execution generated an error
                 //CUT_CHECK_ERROR("Kernel execution failed");
-            
-                // Copy the likelihood totals from each block, sum them up to get a total
-                startTimer(timers.memcpy);
-                memcpy(&shared_likelihoods[tid*NUM_BLOCKS], um_likelihoods, sizeof(float)*NUM_BLOCKS);
-                stopTimer(timers.memcpy);
+                
                 #pragma omp barrier
                 startTimer(timers.cpu);
                 #pragma omp master
@@ -812,7 +801,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         free(temp_memberships);   
      
         // cleanup GPU memory
-        CUDA_SAFE_CALL(cudaFree(um_likelihoods));
      
         CUDA_SAFE_CALL(cudaFree(um_fcs_data_by_event));
         CUDA_SAFE_CALL(cudaFree(um_fcs_data_by_dimension));
@@ -828,6 +816,8 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         CUDA_SAFE_CALL(cudaFree(um_clusters));
     } // end of parallel block
 
+    CUDA_SAFE_CALL(cudaFree(shared_likelihoods));
+
 	// main thread cleanup
 	free(fcs_data_by_dimension);
 	for(int g=0; g < num_gpus; g++) {
@@ -840,7 +830,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         free(clusters[g].Rinv);
     }
     free(clusters[0].memberships);
-	free(shared_likelihoods);
 
 	*final_num_clusters = ideal_num_clusters;
 	return saved_clusters;
