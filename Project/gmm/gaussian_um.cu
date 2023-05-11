@@ -256,7 +256,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         cudaDeviceProp prop;
         cudaGetDeviceProperties(&prop, tid);
         printf("CPU thread %d (of %d) using device %d: %s\n", tid, num_gpus, tid, prop.name);
-        
+
         // Timers for profiling
         //  timers use cuda events (which require a cuda context),
         //  cannot initialize them until after cudaSetDevice(...)
@@ -309,7 +309,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         cudaDeviceSynchronize();
         free(temp_fcs_data);
 
-        cudaMemAdvise(um_fcs_data_by_dimension, mem_size, cudaMemAdviseSetReadMostly , cudaCpuDeviceId);
+        cudaMemAdvise(um_fcs_data_by_dimension, mem_size, cudaMemAdviseSetReadMostly , 0);
         // cudaMemPrefetchAsync(&(um_fcs_data_by_dimension), mem_size, tid);
 
         DEBUG("GPU %d: Finished copying FCS data to device.\n",tid);
@@ -333,11 +333,11 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             //  Only tricky part is how to do average variance? 
             //  Make a kernel for that and reduce on host like the means/covariance?
             startTimer(timers.constants);
-            // cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseSetPreferredLocation, tid);
+            cudaMemAdvise(&(clusters_um[tid].means), sizeof(float)*num_dimensions*original_num_clusters, cudaMemAdviseSetAccessedBy, tid);
             // cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseSetReadMostly, tid);
-            // cudaMemAdvise(fcs_data_by_event, mem_size, cudaMemAdviseSetPreferredLocation, tid);
+            cudaMemAdvise(fcs_data_by_event, mem_size, cudaMemAdviseSetAccessedBy, tid);
             seed_clusters<<< 1, NUM_THREADS_MSTEP >>>( um_fcs_data_by_event, &(clusters_um[tid]), num_dimensions, original_num_clusters, my_num_events);
-            // cudaMemAdvise(fcs_data_by_event, mem_size, cudaMemAdviseUnsetPreferredLocation, tid);
+            //cudaMemAdvise(fcs_data_by_event, mem_size, cudaMemAdviseUnsetPreferredLocation, tid);
             // cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseUnsetPreferredLocation, tid);
             // cudaMemAdvise(&(clusters_um[tid]), sizeof(clusters_t), cudaMemAdviseUnsetReadMostly, tid);
             cudaDeviceSynchronize();
@@ -451,7 +451,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             
             startTimer(timers.cpu); 
             #pragma omp master
-            {
+            {   
                 likelihood = 0.0;
                 for(int i=0; i<NUM_BLOCKS*num_gpus; i++) {
                     likelihood += shared_likelihoods[i]; 
