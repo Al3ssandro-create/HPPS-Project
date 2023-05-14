@@ -17,6 +17,7 @@
 #include <math.h>
 #include <time.h> // for clock(), clock_t, CLOCKS_PER_SEC
 #include <omp.h>
+#include <chrono> 
 
 // includes, project
 #include "gaussian.h"
@@ -433,6 +434,9 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         startTimer(timers.memcpy);
         CUDA_SAFE_CALL(cudaMalloc((void**) &d_c, sizeof(float)));
         stopTimer(timers.memcpy);
+
+        #pragma omp barrier
+        auto start1 = std::chrono::steady_clock::now();
          
         for(int num_clusters=original_num_clusters; num_clusters >= stop_number; num_clusters--) {
             /*************** EM ALGORITHM *****************************/
@@ -799,6 +803,9 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         #pragma omp master
         PRINT("\nFinal rissanen Score was: %f, with %d clusters.\n",min_rissanen,ideal_num_clusters);
         #pragma omp barrier 
+
+        auto diff1 = std::chrono::steady_clock::now() - start1;
+        PROFILING("##### Time execution on device %d: %ld micro sec. #####\n", tid, std::chrono::duration_cast<std::chrono::microseconds>(diff1).count());
     
         // Print some profiling information
         printf("GPU %d:\n\tE-step Kernel:\t%7.4f\t%d\t%7.4f\n\tM-step Kernel:\t%7.4f\t%d\t%7.4f\n\tConsts Kernel:\t%7.4f\t%d\t%7.4f\n\tOrder Reduce:\t%7.4f\t%d\t%7.4f\n\tGPU Memcpy:\t%7.4f\n\tCPU:\t\t%7.4f\n",tid,getTimerValue(timers.e_step) / 1000.0,regroup_iterations, (double) getTimerValue(timers.e_step) / (double) regroup_iterations / 1000.0,getTimerValue(timers.m_step) / 1000.0,params_iterations, (double) getTimerValue(timers.m_step) / (double) params_iterations / 1000.0,getTimerValue(timers.constants) / 1000.0,constants_iterations, (double) getTimerValue(timers.constants) / (double) constants_iterations / 1000.0, getTimerValue(timers.reduce) / 1000.0,reduce_iterations, (double) getTimerValue(timers.reduce) / (double) reduce_iterations / 1000.0, getTimerValue(timers.memcpy) / 1000.0, getTimerValue(timers.cpu) / 1000.0);
