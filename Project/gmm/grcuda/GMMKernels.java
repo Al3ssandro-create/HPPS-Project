@@ -1,5 +1,8 @@
 public class GMMKernels {
     static String constants_kernel = "\n" +
+            "#define PI  3.1415926535897931\n" +
+            "#define NUM_DIMENSIONS 24\n" +
+            "#define DIAG_ONLY 0\n" +
             "__global__ void constants_kernel(float* c_R, float* c_Rinv, float* c_constant, float* c_N, float* c_pi, int num_clusters, int num_dimensions) {\n" +
             "    compute_constants(c_R,c_Rinv,c_constant,num_clusters,num_dimensions);\n" +
             "    \n" +
@@ -147,6 +150,8 @@ public class GMMKernels {
             " }";
 
     static String seed_clusters = "\n" +
+            "#define COVARIANCE_DYNAMIC_RANGE 1E6\n" +
+            "#define NUM_DIMENSIONS 24\n" +
             "__global__ void seed_clusters(float* fcs_data, float* c_means, float* c_R, float* c_N, float* c_pi, float* c_avgvar, int num_dimensions, int num_clusters, int num_events) \n" +
             "{\n" +
             "    // access thread id\n" +
@@ -258,6 +263,9 @@ public class GMMKernels {
             "}";
 
     static String estep1 = "\n" +
+            "#define NUM_THREADS_ESTEP 256 // should be a power of 2 for parallel reductions to work\n" +
+            "#define NUM_DIMENSIONS 24\n" +
+            "#define DIAG_ONLY 0\n" +
             "__global__ void estep1(float* data, float* c_means, float* c_Rinv, float* c_pi, float* c_constant, float* c_memberships, int num_dimensions, int num_events) {\n" +
             "    \n" +
             "    // Cached cluster parameters\n" +
@@ -337,6 +345,7 @@ public class GMMKernels {
             "}";
 
     static String estep2 = "\n" +
+            "#define NUM_THREADS_ESTEP 256 // should be a power of 2 for parallel reductions to work\n" +
             "__global__ void estep2(float* fcs_data, float* c_memberships, int num_dimensions, int num_clusters, int num_events, float* likelihood) {\n" +
             "    float temp;\n" +
             "    float thread_likelihood = 0.0f;\n" +
@@ -419,6 +428,7 @@ public class GMMKernels {
             "}";
 
     static String mstep_means = "\n" +
+            "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
             "__global__ void mstep_means(float* fcs_data, float* c_memberships, float* c_means int num_dimensions, int num_clusters, int num_events) {\n" +
             "    // One block per cluster, per dimension:  (M x D) grid of blocks\n" +
             "    int tid = threadIdx.x;\n" +
@@ -466,6 +476,7 @@ public class GMMKernels {
             "}";
 
     static String mstep_N = "\n" +
+            "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
             "__global__ void mstep_N(float* c_memberships, float* c_N, float* c_pi, int num_dimensions, int num_clusters, int num_events) {\n" +
             "    \n" +
             "    int tid = threadIdx.x;\n" +
@@ -522,6 +533,8 @@ public class GMMKernels {
             "}";
 
     static String mstep_covariance1 = "\n" +
+            "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
+            "#define DIAG_ONLY 0\n" +
             "__global__ void mstep_covariance1(float* fcs_data, float* c_R, float* c_means, float* c_memberships, float* c_avgvar, int num_dimensions, int num_clusters, int num_events) {\n" +
             "    int tid = threadIdx.x; // easier variable name for our thread ID\n" +
             "\n" +
@@ -613,6 +626,10 @@ public class GMMKernels {
             "}";
 
     static String mstep_covariance2 = "\n" +
+            "#define COVARIANCE_DYNAMIC_RANGE 1E6\n" +
+            "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
+            "#define NUM_CLUSTERS_PER_BLOCK 6\n" +
+            "#define DIAG_ONLY 0\n" +
             "__global__ void\n" +
             "mstep_covariance2(float* fcs_data, float* c_R, float* c_means, float* c_memberships, float* c_avgvar, int num_dimensions, int num_clusters, int num_events) {\n" +
             "    int tid = threadIdx.x; // easier variable name for our thread ID\n" +
