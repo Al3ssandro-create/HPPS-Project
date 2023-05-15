@@ -4,21 +4,27 @@ import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.stream.JsonReader;
 
+import java.awt.image.AreaAveragingScaleFilter;
 import java.io.*;
+import java.util.ArrayList;
+import java.util.Scanner;
 
 public class GMM {
     private Context context;
+
+    private int TRUNCATE = 1;
+
     private int num_dimensions;
     private int num_events;
     private int ideal_num_clusters;
 
-    Value seed_clusters;
-    Value constants_kernel;
-    Value estep1;
-    Value estep2;
-    Value mstep_N;
-    Value mstep_means;
-    Value mstep_covariance2;
+    private Value seed_clusters;
+    private Value constants_kernel;
+    private Value estep1;
+    private Value estep2;
+    private Value mstep_N;
+    private Value mstep_means;
+    private Value mstep_covariance2;
 
     public GMM(Config config) {
         this.context = createContext(config);
@@ -42,8 +48,75 @@ public class GMM {
     }
 
     private float[] readData(String fileName) {
+        int length = fileName.length();
+        System.out.println("File Extension: " + fileName.substring(length - 3));
+        if (fileName.endsWith("bin")) {
+            return readBIN(fileName);
+        } else {
+            return readCSV(fileName);
+        }
+    }
+
+    private float[] readBIN(String fileName) {
         // TODO
         return null;
+    }
+
+    private float[] readCSV(String fileName)  {
+        int num_dims = 0;
+        String line1;
+        ArrayList<String> lines = new ArrayList<>();
+
+        try(Scanner scanner = new Scanner(new File(fileName))) {
+            while (scanner.hasNextLine()) {
+                lines.add(scanner.nextLine());
+            }
+        } catch (FileNotFoundException e) {
+            System.out.println("Unable to read the file " + fileName);
+            return null;
+        }
+
+        if (lines.size() > 0) {
+            line1 = lines.get(0);
+            String line2 = line1;
+
+            // TODO: Why is he used these 'tokens'
+            // START
+            String[] temp;
+            temp = line1.split(",");
+
+            num_dims = temp.length;
+            // END
+
+            lines.remove(0); // Remove first line, assumed to be header
+            int num_events = lines.size();
+
+            if (this.TRUNCATE == 1) {
+                System.out.println("Number of events removed to ensure memory alignment " + num_events % (16 * 2));
+                num_events -= num_events % (16 * 2);
+            }
+
+            // Allocate space for all the FCS data
+            float[] data = new float[num_dims * num_events];
+
+            for (int i = 0; i < num_events; i++) {
+                temp = lines.get(i).split(",");
+
+                for (int j = 0; j < num_dims; j++) {
+                    if (temp.length < num_dims) {
+                        return null;
+                    }
+                    data[i * num_dims + j] = Float.parseFloat(temp[j].split(" ")[0]);
+                }
+            }
+
+            this.num_dimensions = num_dims;
+            this.num_events = num_events;
+
+            return data;
+        } else {
+            return null;
+        }
     }
 
     private cluster_t cluster() {
@@ -77,10 +150,9 @@ public class GMM {
         cluster_t clusters = gmm.cluster();
 
         // TODO: print the results
-
     }
 
-    class cluster_t{
+    class cluster_t {
         float[] N;
         float[] pi;
         float[] constant;
