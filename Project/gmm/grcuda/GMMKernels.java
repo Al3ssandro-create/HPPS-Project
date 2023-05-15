@@ -346,7 +346,7 @@ public class GMMKernels {
 
     static String estep2 = "\n" +
             "#define NUM_THREADS_ESTEP 256 // should be a power of 2 for parallel reductions to work\n" +
-            "__global__ void estep2(float* fcs_data, float* c_memberships, int num_dimensions, int num_clusters, int num_events, float* likelihood) {\n" +
+            "__global__ void estep2(float* c_memberships, int num_dimensions, int num_clusters, int num_events, float* likelihood) {\n" +
             "    float temp;\n" +
             "    float thread_likelihood = 0.0f;\n" +
             "    __shared__ float total_likelihoods[NUM_THREADS_ESTEP];\n" +
@@ -429,7 +429,7 @@ public class GMMKernels {
 
     static String mstep_means = "\n" +
             "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
-            "__global__ void mstep_means(float* fcs_data, float* c_memberships, float* c_means int num_dimensions, int num_clusters, int num_events) {\n" +
+            "__global__ void mstep_means(float* fcs_data, float* c_memberships, float* c_means, int num_dimensions, int num_clusters, int num_events) {\n" +
             "    // One block per cluster, per dimension:  (M x D) grid of blocks\n" +
             "    int tid = threadIdx.x;\n" +
             "    int num_threads = blockDim.x;\n" +

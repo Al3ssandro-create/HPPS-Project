@@ -7,17 +7,38 @@ import com.google.gson.stream.JsonReader;
 import java.io.*;
 
 public class GMM {
-    private Context contex;
+    private Context context;
     private int num_dimensions;
     private int num_events;
     private int ideal_num_clusters;
 
-    public GMM(Config config) {
-        this.contex = createContext(config);
-    }
+    Value seed_clusters;
+    Value constants_kernel;
+    Value estep1;
+    Value estep2;
+    Value mstep_N;
+    Value mstep_means;
+    Value mstep_covariance2;
 
-    private void buildKernels(){
-        // TODO
+    public GMM(Config config) {
+        this.context = createContext(config);
+
+        // Building the kernel in order to be able to call them later
+        Value buildKernel = this.context.eval("grcuda", "buildkernel");
+        seed_clusters = buildKernel.execute(GMMKernels.seed_clusters, "seed_clusters",
+                "pointer, pointer, pointer, pointer, pointer, pointer, sint32, sint32, sint32");
+        constants_kernel = buildKernel.execute(GMMKernels.constants_kernel, "constants_kernel",
+                "pointer, pointer, pointer, pointer, pointer, sint32, sint32");
+        estep1 = buildKernel.execute(GMMKernels.estep1, "estep1",
+                "pointer, pointer, pointer, pointer, pointer, pointer, sint32, sint32");
+        estep2 = buildKernel.execute(GMMKernels.estep2, "estep2",
+                "pointer, sint32, sint32, sint32, pointer");
+        mstep_N = buildKernel.execute(GMMKernels.mstep_N, "mstep_N",
+                "pointer, pointer, pointer, sint32, sint32, sint32");
+        mstep_means = buildKernel.execute(GMMKernels.mstep_means, "mstep_means",
+                "pointer, pointer, pointer, sint32, sint32, sint32");
+        mstep_covariance2 = buildKernel.execute(GMMKernels.mstep_covariance2, "mstep_covariance2",
+                "pointer, pointer, pointer, pointer, pointer, sint32, sint32, sint32");
     }
 
     private float[] readData(String fileName) {
