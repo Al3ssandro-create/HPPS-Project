@@ -60,7 +60,6 @@ public class GMM {
 
         // Prepare the kernels
         GMM gmm = new GMM(parsedConfig);
-        gmm.buildKernels();
 
         //////////////////////////
         //     Program main     //

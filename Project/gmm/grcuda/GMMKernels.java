@@ -3,64 +3,6 @@ public class GMMKernels {
             "#define PI  3.1415926535897931\n" +
             "#define NUM_DIMENSIONS 24\n" +
             "#define DIAG_ONLY 0\n" +
-            "__global__ void constants_kernel(float* c_R, float* c_Rinv, float* c_constant, float* c_N, float* c_pi, int num_clusters, int num_dimensions) {\n" +
-            "    compute_constants(c_R,c_Rinv,c_constant,num_clusters,num_dimensions);\n" +
-            "    \n" +
-            "    __syncthreads();\n" +
-            "    \n" +
-            "    if(blockIdx.x == 0) {\n" +
-            "        compute_pi(c_N,c_pi,num_clusters);\n" +
-            "    }\n" +
-            "}\n" +
-            "\n" +
-            "__device__ void compute_constants(float* c_R, float* c_Rinv, float* c_constant, int num_clusters, int num_dimensions) {\n" +
-            "    int tid = threadIdx.x;\n" +
-            "    int num_threads = blockDim.x;\n" +
-            "    int num_elements = num_dimensions*num_dimensions;\n" +
-            "    \n" +
-            "    __shared__ float determinant_arg; // only one thread computes the inverse so we need a shared argument\n" +
-            "    \n" +
-            "    float log_determinant;\n" +
-            "    \n" +
-            "    __shared__ float matrix[NUM_DIMENSIONS*NUM_DIMENSIONS];\n" +
-            "    \n" +
-            "    // Invert the matrix for every cluster\n" +
-            "    int c = blockIdx.x;\n" +
-            "    // Copy the R matrix into shared memory for doing the matrix inversion\n" +
-            "    for(int i=tid; i<num_elements; i+= num_threads ) {\n" +
-            "        matrix[i] = c_R[c*num_dimensions*num_dimensions+i];\n" +
-            "    }\n" +
-            "    \n" +
-            "    __syncthreads(); \n" +
-            "    #if DIAG_ONLY\n" +
-            "        if(tid == 0) { \n" +
-            "            determinant_arg = 1.0f;\n" +
-            "            for(int i=0; i < num_dimensions; i++) {\n" +
-            "                determinant_arg *= matrix[i*num_dimensions+i];\n" +
-            "                matrix[i*num_dimensions+i] = 1.0f / matrix[i*num_dimensions+i];\n" +
-            "            }\n" +
-            "            determinant_arg = logf(determinant_arg);\n" +
-            "        }\n" +
-            "    #else \n" +
-            "        invert(matrix,num_dimensions,&determinant_arg);\n" +
-            "    #endif\n" +
-            "    __syncthreads(); \n" +
-            "    log_determinant = determinant_arg;\n" +
-            "    \n" +
-            "    // Copy the matrx from shared memory back into the cluster memory\n" +
-            "    for(int i=tid; i<num_elements; i+= num_threads) {\n" +
-            "        c_Rinv[c*num_dimensions*num_dimensions+i] = matrix[i];\n" +
-            "    }\n" +
-            "    \n" +
-            "    __syncthreads();\n" +
-            "    \n" +
-            "    // Compute the constant\n" +
-            "    // Equivilent to: log(1/((2*PI)^(M/2)*det(R)^(1/2)))\n" +
-            "    // This constant is used in all E-step likelihood calculations\n" +
-            "    if(tid == 0) {\n" +
-            "        c_constant[c] = -num_dimensions*0.5f*logf(2.0f*PI) - 0.5f*log_determinant;\n" +
-            "    }\n" +
-            "}\n" +
             "\n" +
             "__device__ void compute_pi(float* c_N, float* c_pi, int num_clusters) {\n" +
             "    __shared__ float sum;\n" +
@@ -147,11 +89,120 @@ public class GMMKernels {
             "              }\n" +
             "        }\n" +
             "    }\n" +
-            " }";
+            " }\n" +
+            "\n" +
+            "__device__ void compute_constants(float* c_R, float* c_Rinv, float* c_constant, int num_clusters, int num_dimensions) {\n" +
+            "    int tid = threadIdx.x;\n" +
+            "    int num_threads = blockDim.x;\n" +
+            "    int num_elements = num_dimensions*num_dimensions;\n" +
+            "    \n" +
+            "    __shared__ float determinant_arg; // only one thread computes the inverse so we need a shared argument\n" +
+            "    \n" +
+            "    float log_determinant;\n" +
+            "    \n" +
+            "    __shared__ float matrix[NUM_DIMENSIONS*NUM_DIMENSIONS];\n" +
+            "    \n" +
+            "    // Invert the matrix for every cluster\n" +
+            "    int c = blockIdx.x;\n" +
+            "    // Copy the R matrix into shared memory for doing the matrix inversion\n" +
+            "    for(int i=tid; i<num_elements; i+= num_threads ) {\n" +
+            "        matrix[i] = c_R[c*num_dimensions*num_dimensions+i];\n" +
+            "    }\n" +
+            "    \n" +
+            "    __syncthreads(); \n" +
+            "    #if DIAG_ONLY\n" +
+            "        if(tid == 0) { \n" +
+            "            determinant_arg = 1.0f;\n" +
+            "            for(int i=0; i < num_dimensions; i++) {\n" +
+            "                determinant_arg *= matrix[i*num_dimensions+i];\n" +
+            "                matrix[i*num_dimensions+i] = 1.0f / matrix[i*num_dimensions+i];\n" +
+            "            }\n" +
+            "            determinant_arg = logf(determinant_arg);\n" +
+            "        }\n" +
+            "    #else \n" +
+            "        invert(matrix,num_dimensions,&determinant_arg);\n" +
+            "    #endif\n" +
+            "    __syncthreads(); \n" +
+            "    log_determinant = determinant_arg;\n" +
+            "    \n" +
+            "    // Copy the matrx from shared memory back into the cluster memory\n" +
+            "    for(int i=tid; i<num_elements; i+= num_threads) {\n" +
+            "        c_Rinv[c*num_dimensions*num_dimensions+i] = matrix[i];\n" +
+            "    }\n" +
+            "    \n" +
+            "    __syncthreads();\n" +
+            "    \n" +
+            "    // Compute the constant\n" +
+            "    // Equivilent to: log(1/((2*PI)^(M/2)*det(R)^(1/2)))\n" +
+            "    // This constant is used in all E-step likelihood calculations\n" +
+            "    if(tid == 0) {\n" +
+            "        c_constant[c] = -num_dimensions*0.5f*logf(2.0f*PI) - 0.5f*log_determinant;\n" +
+            "    }\n" +
+            "}\n" +
+            "\n" +
+            "__global__ void constants_kernel(float* c_R, float* c_Rinv, float* c_constant, float* c_N, float* c_pi, int num_clusters, int num_dimensions) {\n" +
+            "    compute_constants(c_R,c_Rinv,c_constant,num_clusters,num_dimensions);\n" +
+            "    \n" +
+            "    __syncthreads();\n" +
+            "    \n" +
+            "    if(blockIdx.x == 0) {\n" +
+            "        compute_pi(c_N,c_pi,num_clusters);\n" +
+            "    }\n" +
+            "}";
 
     static String seed_clusters = "\n" +
             "#define COVARIANCE_DYNAMIC_RANGE 1E6\n" +
             "#define NUM_DIMENSIONS 24\n" +
+            "\n" +
+            "__device__ void mvtmeans(float* fcs_data, int num_dimensions, int num_events, float* means) {\n" +
+            "    // access thread id\n" +
+            "    int tid = threadIdx.x;\n" +
+            "\n" +
+            "    if(tid < num_dimensions) {\n" +
+            "        means[tid] = 0.0;\n" +
+            "\n" +
+            "        // Sum up all the values for the dimension\n" +
+            "        for(int i=0; i < num_events; i++) {\n" +
+            "            means[tid] += fcs_data[i*num_dimensions+tid];\n" +
+            "        }\n" +
+            "\n" +
+            "        // Divide by the # of elements to get the average\n" +
+            "        means[tid] /= (float) num_events;\n" +
+            "    }\n" +
+            "}\n" +
+            "\n" +
+            "__device__ void averageVariance(float* fcs_data, float* means, int num_dimensions, int num_events, float* avgvar) {\n" +
+            "    // access thread id\n" +
+            "    int tid = threadIdx.x;\n" +
+            "    \n" +
+            "    __shared__ float variances[NUM_DIMENSIONS];\n" +
+            "    __shared__ float total_variance;\n" +
+            "    \n" +
+            "    // Compute average variance for each dimension\n" +
+            "    if(tid < num_dimensions) {\n" +
+            "        variances[tid] = 0.0;\n" +
+            "        // Sum up all the variance\n" +
+            "        for(int j=0; j < num_events; j++) {\n" +
+            "            // variance = (data - mean)^2\n" +
+            "            variances[tid] += (fcs_data[j*num_dimensions + tid])*(fcs_data[j*num_dimensions + tid]);\n" +
+            "        }\n" +
+            "        variances[tid] /= (float) num_events;\n" +
+            "        variances[tid] -= means[tid]*means[tid];\n" +
+            "    }\n" +
+            "    \n" +
+            "    __syncthreads();\n" +
+            "    \n" +
+            "    if(tid == 0) {\n" +
+            "        total_variance = 0.0;\n" +
+            "        for(int i=0; i<num_dimensions;i++) {\n" +
+            "            ////printf(\"%f \",variances[tid]);\n" +
+            "            total_variance += variances[i];\n" +
+            "        }\n" +
+            "        ////printf(\"\\nTotal variance: %f\\n\",total_variance);\n" +
+            "        *avgvar = total_variance / (float) num_dimensions;\n" +
+            "        ////printf(\"Average Variance: %f\\n\",*avgvar);\n" +
+            "    }\n" +
+            "}\n" +
             "__global__ void seed_clusters(float* fcs_data, float* c_means, float* c_R, float* c_N, float* c_pi, float* c_avgvar, int num_dimensions, int num_clusters, int num_events) \n" +
             "{\n" +
             "    // access thread id\n" +
@@ -210,62 +261,30 @@ public class GMMKernels {
             "            c_avgvar[c] = avgvar / COVARIANCE_DYNAMIC_RANGE;\n" +
             "        }\n" +
             "    }\n" +
-            "}\n" +
-            "\n" +
-            "__device__ void mvtmeans(float* fcs_data, int num_dimensions, int num_events, float* means) {\n" +
-            "    // access thread id\n" +
-            "    int tid = threadIdx.x;\n" +
-            "\n" +
-            "    if(tid < num_dimensions) {\n" +
-            "        means[tid] = 0.0;\n" +
-            "\n" +
-            "        // Sum up all the values for the dimension\n" +
-            "        for(int i=0; i < num_events; i++) {\n" +
-            "            means[tid] += fcs_data[i*num_dimensions+tid];\n" +
-            "        }\n" +
-            "\n" +
-            "        // Divide by the # of elements to get the average\n" +
-            "        means[tid] /= (float) num_events;\n" +
-            "    }\n" +
-            "}\n" +
-            "\n" +
-            "__device__ void averageVariance(float* fcs_data, float* means, int num_dimensions, int num_events, float* avgvar) {\n" +
-            "    // access thread id\n" +
-            "    int tid = threadIdx.x;\n" +
-            "    \n" +
-            "    __shared__ float variances[NUM_DIMENSIONS];\n" +
-            "    __shared__ float total_variance;\n" +
-            "    \n" +
-            "    // Compute average variance for each dimension\n" +
-            "    if(tid < num_dimensions) {\n" +
-            "        variances[tid] = 0.0;\n" +
-            "        // Sum up all the variance\n" +
-            "        for(int j=0; j < num_events; j++) {\n" +
-            "            // variance = (data - mean)^2\n" +
-            "            variances[tid] += (fcs_data[j*num_dimensions + tid])*(fcs_data[j*num_dimensions + tid]);\n" +
-            "        }\n" +
-            "        variances[tid] /= (float) num_events;\n" +
-            "        variances[tid] -= means[tid]*means[tid];\n" +
-            "    }\n" +
-            "    \n" +
-            "    __syncthreads();\n" +
-            "    \n" +
-            "    if(tid == 0) {\n" +
-            "        total_variance = 0.0;\n" +
-            "        for(int i=0; i<num_dimensions;i++) {\n" +
-            "            ////printf(\"%f \",variances[tid]);\n" +
-            "            total_variance += variances[i];\n" +
-            "        }\n" +
-            "        ////printf(\"\\nTotal variance: %f\\n\",total_variance);\n" +
-            "        *avgvar = total_variance / (float) num_dimensions;\n" +
-            "        ////printf(\"Average Variance: %f\\n\",*avgvar);\n" +
-            "    }\n" +
             "}";
 
     static String estep1 = "\n" +
+            "#define\tNUM_BLOCKS 24\n" +
             "#define NUM_THREADS_ESTEP 256 // should be a power of 2 for parallel reductions to work\n" +
             "#define NUM_DIMENSIONS 24\n" +
             "#define DIAG_ONLY 0\n" +
+            "\n" +
+            "__device__ void compute_indices(int num_events, int* start, int* stop) {\n" +
+            "    // Break up the events evenly between the blocks\n" +
+            "    int num_pixels_per_block = num_events / NUM_BLOCKS;\n" +
+            "    // Make sure the events being accessed by the block are aligned to a multiple of 16\n" +
+            "    num_pixels_per_block = num_pixels_per_block - (num_pixels_per_block % 16);\n" +
+            "    \n" +
+            "    *start = blockIdx.y * num_pixels_per_block + threadIdx.x;\n" +
+            "    \n" +
+            "    // Last block will handle the leftover events\n" +
+            "    if(blockIdx.y == gridDim.y-1) {\n" +
+            "        *stop = num_events;\n" +
+            "    } else { \n" +
+            "        *stop = (blockIdx.y+1) * num_pixels_per_block;\n" +
+            "    }\n" +
+            "}\n" +
+            "\n" +
             "__global__ void estep1(float* data, float* c_means, float* c_Rinv, float* c_pi, float* c_constant, float* c_memberships, int num_dimensions, int num_events) {\n" +
             "    \n" +
             "    // Cached cluster parameters\n" +
@@ -326,26 +345,25 @@ public class GMMKernels {
             "        // numerator of the E-step probability computation\n" +
             "        c_memberships[c*num_events+event] = -0.5f * like + constant + logf(cluster_pi);\n" +
             "    }\n" +
-            "}\n" +
-            "\n" +
-            "__device__ void compute_indices(int num_events, int* start, int* stop) {\n" +
-            "    // Break up the events evenly between the blocks\n" +
-            "    int num_pixels_per_block = num_events / NUM_BLOCKS;\n" +
-            "    // Make sure the events being accessed by the block are aligned to a multiple of 16\n" +
-            "    num_pixels_per_block = num_pixels_per_block - (num_pixels_per_block % 16);\n" +
-            "    \n" +
-            "    *start = blockIdx.y * num_pixels_per_block + threadIdx.x;\n" +
-            "    \n" +
-            "    // Last block will handle the leftover events\n" +
-            "    if(blockIdx.y == gridDim.y-1) {\n" +
-            "        *stop = num_events;\n" +
-            "    } else { \n" +
-            "        *stop = (blockIdx.y+1) * num_pixels_per_block;\n" +
-            "    }\n" +
             "}";
 
     static String estep2 = "\n" +
             "#define NUM_THREADS_ESTEP 256 // should be a power of 2 for parallel reductions to work\n" +
+            "\n" +
+            "__device__ float parallelSum(float* data, const unsigned int ndata) {\n" +
+            "  const unsigned int tid = threadIdx.x;\n" +
+            "  float t;\n" +
+            "\n" +
+            "  __syncthreads();\n" +
+            "\n" +
+            "  // Butterfly sum.  ndata MUST be a power of 2.\n" +
+            "  for(unsigned int bit = ndata >> 1; bit > 0; bit >>= 1) {\n" +
+            "    t = data[tid] + data[tid^bit];  __syncthreads();\n" +
+            "    data[tid] = t;                  __syncthreads();\n" +
+            "  }\n" +
+            "  return data[tid];\n" +
+            "}\n" +
+            "\n" +
             "__global__ void estep2(float* c_memberships, int num_dimensions, int num_clusters, int num_events, float* likelihood) {\n" +
             "    float temp;\n" +
             "    float thread_likelihood = 0.0f;\n" +
@@ -411,7 +429,10 @@ public class GMMKernels {
             "    if(tid == 0) {\n" +
             "        likelihood[blockIdx.x] = temp;\n" +
             "    }\n" +
-            "}\n" +
+            "}";
+
+    static String mstep_means = "\n" +
+            "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
             "\n" +
             "__device__ float parallelSum(float* data, const unsigned int ndata) {\n" +
             "  const unsigned int tid = threadIdx.x;\n" +
@@ -425,10 +446,8 @@ public class GMMKernels {
             "    data[tid] = t;                  __syncthreads();\n" +
             "  }\n" +
             "  return data[tid];\n" +
-            "}";
-
-    static String mstep_means = "\n" +
-            "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
+            "}\n" +
+            "\n" +
             "__global__ void mstep_means(float* fcs_data, float* c_memberships, float* c_means, int num_dimensions, int num_clusters, int num_events) {\n" +
             "    // One block per cluster, per dimension:  (M x D) grid of blocks\n" +
             "    int tid = threadIdx.x;\n" +
@@ -459,7 +478,10 @@ public class GMMKernels {
             "        c_means[c*num_dimensions+d] = temp_sum[0];\n" +
             "        // c_means[c*num_dimensions+d] = temp_sum[0] / N[c];\n" +
             "    }*/\n" +
-            "}\n" +
+            "}";
+
+    static String mstep_N = "\n" +
+            "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
             "\n" +
             "__device__ float parallelSum(float* data, const unsigned int ndata) {\n" +
             "  const unsigned int tid = threadIdx.x;\n" +
@@ -473,10 +495,7 @@ public class GMMKernels {
             "    data[tid] = t;                  __syncthreads();\n" +
             "  }\n" +
             "  return data[tid];\n" +
-            "}";
-
-    static String mstep_N = "\n" +
-            "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
+            "}\n" +
             "__global__ void mstep_N(float* c_memberships, float* c_N, float* c_pi, int num_dimensions, int num_clusters, int num_events) {\n" +
             "    \n" +
             "    int tid = threadIdx.x;\n" +
@@ -516,7 +535,11 @@ public class GMMKernels {
             "        // Set PI to the # of expected items, and then normalize it later\n" +
             "        c_pi[c] = c_N[c];\n" +
             "    }*/\n" +
-            "}\n" +
+            "}";
+
+    static String mstep_covariance1 = "\n" +
+            "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
+            "#define DIAG_ONLY 0\n" +
             "\n" +
             "__device__ float parallelSum(float* data, const unsigned int ndata) {\n" +
             "  const unsigned int tid = threadIdx.x;\n" +
@@ -530,11 +553,22 @@ public class GMMKernels {
             "    data[tid] = t;                  __syncthreads();\n" +
             "  }\n" +
             "  return data[tid];\n" +
-            "}";
-
-    static String mstep_covariance1 = "\n" +
-            "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
-            "#define DIAG_ONLY 0\n" +
+            "}\n" +
+            "\n" +
+            "__device__ void compute_row_col(int n, int* row, int* col) {\n" +
+            "    int i = 0;\n" +
+            "    for(int r=0; r < n; r++) {\n" +
+            "        for(int c=0; c <= r; c++) {\n" +
+            "            if(i == blockIdx.y) {  \n" +
+            "                *row = r;\n" +
+            "                *col = c;\n" +
+            "                return;\n" +
+            "            }\n" +
+            "            i++;\n" +
+            "        }\n" +
+            "    }\n" +
+            "}\n" +
+            "\n" +
             "__global__ void mstep_covariance1(float* fcs_data, float* c_R, float* c_means, float* c_memberships, float* c_avgvar, int num_dimensions, int num_clusters, int num_events) {\n" +
             "    int tid = threadIdx.x; // easier variable name for our thread ID\n" +
             "\n" +
@@ -595,7 +629,13 @@ public class GMMKernels {
             "            c_R[c*num_dimensions*num_dimensions+matrix_index] += c_avgvar[c];\n" +
             "        }\n" +
             "    }\n" +
-            "}\n" +
+            "}";
+
+    static String mstep_covariance2 = "\n" +
+            "#define COVARIANCE_DYNAMIC_RANGE 1E6\n" +
+            "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
+            "#define NUM_CLUSTERS_PER_BLOCK 6\n" +
+            "#define DIAG_ONLY 0\n" +
             "\n" +
             "__device__ float parallelSum(float* data, const unsigned int ndata) {\n" +
             "  const unsigned int tid = threadIdx.x;\n" +
@@ -623,15 +663,9 @@ public class GMMKernels {
             "            i++;\n" +
             "        }\n" +
             "    }\n" +
-            "}";
-
-    static String mstep_covariance2 = "\n" +
-            "#define COVARIANCE_DYNAMIC_RANGE 1E6\n" +
-            "#define NUM_THREADS_MSTEP 256 // should be a power of 2 for parallel reductions to work\n" +
-            "#define NUM_CLUSTERS_PER_BLOCK 6\n" +
-            "#define DIAG_ONLY 0\n" +
-            "__global__ void\n" +
-            "mstep_covariance2(float* fcs_data, float* c_R, float* c_means, float* c_memberships, float* c_avgvar, int num_dimensions, int num_clusters, int num_events) {\n" +
+            "}\n" +
+            "\n" +
+            "__global__ void mstep_covariance2(float* fcs_data, float* c_R, float* c_means, float* c_memberships, float* c_avgvar, int num_dimensions, int num_clusters, int num_events) {\n" +
             "    int tid = threadIdx.x; // easier variable name for our thread ID\n" +
             "\n" +
             "    // Determine what row,col this matrix is handling, also handles the symmetric element\n" +
@@ -714,34 +748,6 @@ public class GMMKernels {
             "            if(row == col) {\n" +
             "                c_R[offset+row*num_dimensions+col] += c_avgvar[c+c1];\n" +
             "            }\n" +
-            "        }\n" +
-            "    }\n" +
-            "}\n" +
-            "\n" +
-            "__device__ float parallelSum(float* data, const unsigned int ndata) {\n" +
-            "  const unsigned int tid = threadIdx.x;\n" +
-            "  float t;\n" +
-            "\n" +
-            "  __syncthreads();\n" +
-            "\n" +
-            "  // Butterfly sum.  ndata MUST be a power of 2.\n" +
-            "  for(unsigned int bit = ndata >> 1; bit > 0; bit >>= 1) {\n" +
-            "    t = data[tid] + data[tid^bit];  __syncthreads();\n" +
-            "    data[tid] = t;                  __syncthreads();\n" +
-            "  }\n" +
-            "  return data[tid];\n" +
-            "}\n" +
-            "\n" +
-            "__device__ void compute_row_col(int n, int* row, int* col) {\n" +
-            "    int i = 0;\n" +
-            "    for(int r=0; r < n; r++) {\n" +
-            "        for(int c=0; c <= r; c++) {\n" +
-            "            if(i == blockIdx.y) {  \n" +
-            "                *row = r;\n" +
-            "                *col = c;\n" +
-            "                return;\n" +
-            "            }\n" +
-            "            i++;\n" +
             "        }\n" +
             "    }\n" +
             "}";

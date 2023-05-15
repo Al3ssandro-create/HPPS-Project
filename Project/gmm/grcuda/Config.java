@@ -9,5 +9,6 @@ public class Config {
     public boolean stream_attach;
     public boolean time_computation;
     public int num_gpus;
-    public String bandwidthMatrix = "~/grcuda/projects/resources/connection_graph/datasets/connection_graph_test.csv";
+    public String bandwidthMatrix = "";
+    // public String bandwidthMatrix = "~/grcuda/projects/resources/connection_graph/datasets/connection_graph_test.csv";
 }

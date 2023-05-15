@@ -3,7 +3,7 @@
     "dependency_policies": "with-const",
     "new_stream_policies": "always-new",
     "parent_stream_policies": "multigpu-disjoint",
-    "choose_device_policies": "minmax-transfer-time",
+    "choose_device_policies": "round-robin",
     "memory_advise": "none",
     "prefetch": false,
     "stream_attach": false,
