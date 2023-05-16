@@ -14,14 +14,18 @@ public class GMM {
     private int TRUNCATE = 1;
     private int PRINT = 1;
     private int DEBUG = 1;
+    private int PROFILING = 1;
     private int NUM_BLOCKS = 24;
     private int NUM_CLUSTERS_PER_BLOCK = 6;
     private int NUM_THREADS_MSTEP = 256;
+    private int NUM_THREADS_ESTEP = 256;
+    private int MIN_ITERS = 1;
+    private int MAX_ITERS = 200;
 
     private int num_gpus;
     private int num_dimensions;
     private int num_events;
-    private int ideal_num_clusters;
+    private int ideal_num_clusters = 0;
     private int final_num_clusters;
 
     private Value seed_clusters;
@@ -31,6 +35,9 @@ public class GMM {
     private Value mstep_N;
     private Value mstep_means;
     private Value mstep_covariance2;
+
+    private long start_exec;
+    private long end_exec;
 
     public GMM(Config config) {
         this.context = createContext(config);
@@ -54,7 +61,7 @@ public class GMM {
                 "pointer, pointer, pointer, pointer, pointer, sint32, sint32, sint32");
     }
 
-    private float[] readData(String fileName) {
+    public float[] readData(String fileName) {
         int length = fileName.length();
         System.out.println("File Extension: " + fileName.substring(length - 3));
         if (fileName.endsWith("bin")) {
@@ -64,12 +71,12 @@ public class GMM {
         }
     }
 
-    private float[] readBIN(String fileName) {
+    public float[] readBIN(String fileName) {
         // TODO
         return null;
     }
 
-    private float[] readCSV(String fileName) {
+    public float[] readCSV(String fileName) {
         int num_dims = 0;
         String line1;
         ArrayList<String> lines = new ArrayList<>();
@@ -126,12 +133,11 @@ public class GMM {
         }
     }
 
-    private cluster_t cluster(int original_num_clusters, int desired_num_clusters, float[] fcs_data_by_event) {
+    public cluster_t cluster(int original_num_clusters, int desired_num_clusters, float[] fcs_data_by_event) {
         int regroup_iterations = 0;
         int params_iterations = 0;
         int constants_iterations = 0;
         int reduce_iterations = 0;
-        int ideal_num_clusters;
         int stop_number;
 
         // Number of clusters to stop iterating at.
@@ -167,13 +173,13 @@ public class GMM {
 
         // Setup the cluster data structures on host
         // This the shared memory space between the GPUs
-        clusters_um[] um_clusters = new clusters_um[num_gpus];
+        cluster_um[] um_clusters = new cluster_um[num_gpus];
 
         // Only need one copy of all the memberships
         float[] special_memberships = new float[num_events * original_num_clusters];
 
         // Declare another set of clusters for saving the results of the best configuration
-        clusters_t saved_clusters = new cluster_t();
+        cluster_t saved_clusters = new cluster_t();
         saved_clusters.N = new float[original_num_clusters];
         saved_clusters.pi = new float[original_num_clusters];
         saved_clusters.constant = new float[original_num_clusters];
@@ -185,15 +191,16 @@ public class GMM {
 
         if (DEBUG == 1) System.out.println("Finished allocating shared cluster structures on host");
 
+        // TODO: Probably we can do an array of size num gpus (normal) and then each el is a Value of NUM_BLOCK size
         // Used to hold the result from regroup kernel
         Value[] shared_likelihoods = new Value[NUM_BLOCKS * num_gpus];
         float likelihood, old_likelihood;
-        float min_rissanen;
+        float min_rissanen = 0;
 
         // ------ OPENMP START ------
 
         // TODO: check here the size, they are different from 'saved_clusters'
-        clusters_t scratch_cluster = new cluster_t();
+        cluster_t scratch_cluster = new cluster_t();
         scratch_cluster.N = new float[1];
         scratch_cluster.pi = new float[1];
         scratch_cluster.constant = new float[1];
@@ -282,471 +289,394 @@ public class GMM {
         for (int c = 0; c < original_num_clusters; c++) {
             if (DEBUG == 1) System.out.println("Cluster #" + c);
 
-            if (DEBUG == 1) System.out.println("\tN: " + um_clusters[0].N[c]);
+            if (DEBUG == 1) System.out.println("\tN: " + um_clusters[0].N.getArrayElement(c).asString());
 
-            if (DEBUG == 1) System.out.println("\tpi: " + um_clusters[0].pi[c]);
+            if (DEBUG == 1) System.out.println("\tpi: " + um_clusters[0].pi.getArrayElement(c).asString());
 
             if (DEBUG == 1) System.out.println("\tMeans:");
             for (int d = 0; d < num_dimensions; d++)
-                if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].means[c * num_dimensions + d]);
+                if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].means.getArrayElement(c * num_dimensions + d).asString());
 
             if (DEBUG == 1) System.out.println("\tR:");
             for (int d = 0; d < num_dimensions; d++)
                 for (int e = 0; e < num_dimensions; e++)
-                    if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].R[c * num_dimensions * num_dimensions + d * num_dimensions + e]);
+                    if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].R.getArrayElement(c * num_dimensions * num_dimensions + d * num_dimensions + e).asString());
 
             if (DEBUG == 1) System.out.println("\tR-inverse:");
             for (int d = 0; d < num_dimensions; d++)
                 for (int e = 0; e < num_dimensions; e++)
-                    if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].Rinv[c * num_dimensions * num_dimensions + d * num_dimensions + e]);
+                    if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].Rinv.getArrayElement(c * num_dimensions * num_dimensions + d * num_dimensions + e).asString());
 
-            DEBUG("\tAvgvar: " + um_clusters[0].avgvar[c]);
+            if (DEBUG == 1) System.out.println("\tAvgvar: " + um_clusters[0].avgvar.getArrayElement(c).asString());
 
-            DEBUG("\tConstant: " + um_clusters[0].constant[c]);
+            if (DEBUG == 1) System.out.println("\tConstant: " + um_clusters[0].constant.getArrayElement(c).asString());
         }
-        // ------ OPENMP MASTER END (NUM_GPU == 0)------
+        // ------ OPENMP MASTER END (NUM_GPU == 0) ------
 
-        // TODO: TO BE CONTINUED
+        // Synchronize after first gpu does the seeding, copy result to all gpus
+        for (int i = 0; i < num_gpus; i++) {
+            //memcpy(um_clusters[tid].N, um_clusters[0].N, sizeof( float)*original_num_clusters);
+            //memcpy(um_clusters[tid].pi, um_clusters[0].pi, sizeof( float)*original_num_clusters);
+            //memcpy(um_clusters[tid].constant, um_clusters[0].constant, sizeof( float)*original_num_clusters);
+            //memcpy(um_clusters[tid].avgvar, um_clusters[0].avgvar, sizeof( float)*original_num_clusters);
+            //memcpy(um_clusters[tid].means, um_clusters[0].means, sizeof( float)*num_dimensions * original_num_clusters);
+            //memcpy(um_clusters[tid].R, um_clusters[0].R, sizeof( float)*num_dimensions * num_dimensions * original_num_clusters);
+            //memcpy(um_clusters[tid].Rinv, um_clusters[0].Rinv, sizeof( float)*num_dimensions * num_dimensions * original_num_clusters);
+            memcpy();
+            memcpy();
+            memcpy();
+            memcpy();
+            memcpy();
+            memcpy();
+            memcpy();
+        }
 
-        // synchronize after first gpu does the seeding, copy result to all gpus
-        #pragma omp barrier
-        startTimer(timers.memcpy);
-        memcpy(um_clusters[tid].N, um_clusters[0].N, sizeof( float)*original_num_clusters);
-        memcpy(um_clusters[tid].pi, um_clusters[0].pi, sizeof( float)*original_num_clusters);
-        memcpy(um_clusters[tid].constant, um_clusters[0].constant, sizeof( float)*original_num_clusters);
-        memcpy(um_clusters[tid].avgvar, um_clusters[0].avgvar, sizeof( float)*original_num_clusters);
-        memcpy(um_clusters[tid].means, um_clusters[0].means, sizeof( float)*num_dimensions * original_num_clusters);
-        memcpy(um_clusters[tid].R, um_clusters[0].R, sizeof( float)*
-        num_dimensions * num_dimensions * original_num_clusters);
-        memcpy(um_clusters[tid].Rinv, um_clusters[0].Rinv, sizeof( float)*
-        num_dimensions * num_dimensions * original_num_clusters);
-        stopTimer(timers.memcpy);
-
-        startTimer(timers.cpu);
         // Calculate an epsilon value
-        //int ndata_points = num_events*num_dimensions;
-        float epsilon = (1 + num_dimensions + 0.5f * (num_dimensions + 1) * num_dimensions) * logf((float) num_events * num_dimensions) * 0.001f;
+        float epsilon = (1 + num_dimensions + 0.5f * (num_dimensions + 1) * num_dimensions) * (float) Math.log((double) num_events * num_dimensions) * 0.001f;
         int iters;
 
         //epsilon = 1e-6;
-        #pragma omp master
-        PRINT("Gaussian.cu: epsilon = %f\n", epsilon);
+        if (PRINT == 1) System.out.println("Gaussian.cu: epsilon = " + epsilon);
 
         // Variables for GMM reduce order
-        float distance, min_distance = 0.0;
+        float distance, min_distance = 0.0F;
         float rissanen;
         int min_c1, min_c2;
-        stopTimer(timers.cpu);
 
-        #pragma omp barrier
-        auto start1 = std::chrono::steady_clock::now ();
+        start_exec = System.nanoTime();
 
         for (int num_clusters = original_num_clusters; num_clusters >= stop_number; num_clusters--) {
             /*************** EM ALGORITHM *****************************/
 
-            // do initial E-step
+            // Do initial E-step
             // Calculates a cluster membership probability
             // for each event and each cluster.
-            DEBUG("Invoking E-step kernels.");
-            startTimer(timers.e_step);
-            estep1 << < dim3(num_clusters, NUM_BLOCKS), NUM_THREADS_ESTEP >>> (um_fcs_data_by_dimension, &
-            (um_clusters[tid]), num_dimensions, my_num_events);
-            estep2 << < NUM_BLOCKS, NUM_THREADS_ESTEP >>> (um_fcs_data_by_dimension, &
-            (um_clusters[tid]), num_dimensions, num_clusters, my_num_events, &shared_likelihoods[tid * NUM_BLOCKS]);
-            cudaDeviceSynchronize();
-            #pragma omp master
-            {
-                regroup_iterations++;
+            if (DEBUG == 1) System.out.println("Invoking E-step kernels.");
+            int[] gridDim = {num_clusters, NUM_BLOCKS};
+            for (int i = 0; i < num_gpus; i++) {
+                estep1.execute(gridDim, NUM_THREADS_ESTEP)
+                        .execute(um_fcs_data_by_dimension[i], um_clusters[i].means, um_clusters[i].Rinv, um_clusters[i].pi,
+                                um_clusters[i].constant, um_clusters[i].memberships, num_dimensions, my_num_events[i]);
             }
-            // check if kernel execution generated an error
-            //CUT_CHECK_ERROR("Kernel execution failed");
-            stopTimer(timers.e_step);
-
-            #pragma omp barrier
-            startTimer(timers.cpu);
-
-            #pragma omp master
-            {
-                likelihood = 0.0;
-                for (int i = 0; i < NUM_BLOCKS * num_gpus; i++) {
-                    likelihood += shared_likelihoods[i];
-                }
-                DEBUG("Likelihood: %e\n", likelihood);
+            for (int i = 0; i < num_gpus; i++) {
+                estep2.execute(NUM_BLOCKS, NUM_THREADS_ESTEP)
+                        .execute(um_clusters[i].memberships, num_dimensions, num_clusters, my_num_events[i], shared_likelihoods[i * NUM_BLOCKS]);
             }
-            #pragma omp barrier
-            stopTimer(timers.cpu);
+            regroup_iterations++;
+
+            likelihood = 0.0F;
+            for (int i = 0; i < num_gpus; i++)
+                for (int j = 0; j < NUM_BLOCKS; j++)
+                    likelihood += shared_likelihoods[i].getArrayElement(j).asFloat();
+
+            if (DEBUG == 1) System.out.println("Likelihood: " + likelihood);
 
             float change = epsilon * 2;
 
-            #pragma omp master
-            PRINT("Performing EM algorithm on %d clusters.\n", num_clusters);
+            if (PRINT == 1) System.out.println("Performing EM algorithm on" + num_clusters + "clusters.");
             iters = 0;
             // This is the iterative loop for the EM algorithm.
             // It re-estimates parameters, re-computes constants, and then regroups the events
             // These steps keep repeating until the change in likelihood is less than some epsilon
-            while (iters < MIN_ITERS || (fabs(change) > epsilon && iters < MAX_ITERS)) {
-                #pragma omp master
-                {
-                    old_likelihood = likelihood;
+            while (iters < MIN_ITERS || (Math.abs(change) > epsilon && iters < MAX_ITERS)) {
+                old_likelihood = likelihood;
+
+                if (DEBUG == 1) System.out.println("Invoking reestimate_parameters (M-step) kernel.");
+
+                // This kernel computes a new N, pi isn't updated until compute_constants though
+                for (int i = 0; i < num_gpus; i++) {
+                    mstep_N.execute(num_clusters, NUM_THREADS_MSTEP)
+                            .execute(um_clusters[i].memberships, um_clusters[i].N, um_clusters[i].pi, num_dimensions, num_clusters, my_num_events[i]);
                 }
 
-                DEBUG("Invoking reestimate_parameters (M-step) kernel.");
-                startTimer(timers.m_step);
-                // This kernel computes a new N, pi isn't updated until compute_constants though
-                mstep_N << < num_clusters, NUM_THREADS_MSTEP >>> ( & (um_clusters[tid]), num_dimensions, num_clusters, my_num_events)
-                ;
-                cudaDeviceSynchronize();
-                stopTimer(timers.m_step);
-
-                // TODO: figure out the omp reduction pragma...
-                // Reduce N for all clusters, copy back to device
-                #pragma omp barrier
-                startTimer(timers.cpu);
-                #pragma omp master
-                {
-                    for (int g = 1; g < num_gpus; g++) {
-                        for (int c = 0; c < num_clusters; c++) {
-                            um_clusters[0].N[c] += um_clusters[g].N[c];
-                            DEBUG("Cluster %d: N = %f\n", c, um_clusters[0].N[c]);
-                        }
+                for (int g = 1; g < num_gpus; g++) {
+                    for (int c = 0; c < num_clusters; c++) {
+                        um_clusters[0].N.setArrayElement(c, um_clusters[0].N.getArrayElement(c).asFloat() + um_clusters[g].N.getArrayElement(c).asFloat());
+                        if (DEBUG == 1) System.out.println("Cluster " + c + ": N = " + um_clusters[0].N.getArrayElement(c));
                     }
                 }
-                #pragma omp barrier
-                stopTimer(timers.cpu);
-                startTimer(timers.memcpy);
-                memcpy(um_clusters[tid].N, um_clusters[0].N, sizeof( float)*num_clusters);
-                stopTimer(timers.memcpy);
 
-                startTimer(timers.m_step);
-                dim3 gridDim1 (num_clusters, num_dimensions);
-                mstep_means << < gridDim1, NUM_THREADS_MSTEP >>> (um_fcs_data_by_dimension, &
-                (um_clusters[tid]), num_dimensions, num_clusters, my_num_events);
-                cudaDeviceSynchronize();
-                stopTimer(timers.m_step);
+                for (int i = 0; i < num_gpus; i++) {
+                    //memcpy(um_clusters[tid].N, um_clusters[0].N, sizeof( float)*num_clusters);
+                    memcpy();
+                }
+
+                int[] gridDim1 = {num_clusters, num_dimensions};
+                for (int i = 0; i < num_gpus; i++) {
+                    mstep_means.execute(gridDim1, NUM_THREADS_MSTEP)
+                            .execute(um_fcs_data_by_dimension[i], um_clusters[i].memberships, um_clusters[i].means, num_dimensions, num_clusters, my_num_events[i]);
+                }
 
                 // Reduce means for all clusters, copy back to device
-                #pragma omp barrier
-                startTimer(timers.cpu);
-                #pragma omp master
-                {
-                    for (int g = 1; g < num_gpus; g++) {
-                        for (int c = 0; c < num_clusters; c++) {
-                            for (int d = 0; d < num_dimensions; d++) {
-                                um_clusters[0].means[c * num_dimensions + d] += um_clusters[g].means[c * num_dimensions + d];
-                            }
-                        }
-                    }
+                // ------ OPENMP MASTER START (NUM_GPU == 0) ------
+                for (int g = 1; g < num_gpus; g++) {
                     for (int c = 0; c < num_clusters; c++) {
-                        DEBUG("Cluster %d  Means:", c, um_clusters[0].N[c]);
                         for (int d = 0; d < num_dimensions; d++) {
-                            if (um_clusters[0].N[c] > 0.5f) {
-                                um_clusters[0].means[c * num_dimensions + d] /= um_clusters[0].N[c];
-                            } else {
-                                um_clusters[0].means[c * num_dimensions + d] = 0.0f;
-                            }
-                            DEBUG(" %f", um_clusters[0].means[c * num_dimensions + d]);
+                            um_clusters[0].means.setArrayElement(c * num_dimensions + d,
+                                    um_clusters[0].means.getArrayElement(c * num_dimensions + d).asFloat() +
+                                            um_clusters[g].means.getArrayElement(c * num_dimensions + d).asFloat());
                         }
-                        DEBUG("\n");
                     }
                 }
-                #pragma omp barrier
-                stopTimer(timers.cpu);
-                startTimer(timers.memcpy);
-                memcpy(um_clusters[tid].means, um_clusters[0].means, sizeof( float)*num_clusters * num_dimensions);
-                stopTimer(timers.memcpy);
+                for (int c = 0; c < num_clusters; c++) {
+                    if (DEBUG == 1) System.out.println("Cluster " + c + " Means: " + um_clusters[0].N.getArrayElement(c).asString());
+                    for (int d = 0; d < num_dimensions; d++) {
+                        if (um_clusters[0].N.getArrayElement(c).asFloat() > 0.5F) {
+                            um_clusters[0].means.setArrayElement(c * num_dimensions + d,
+                                    um_clusters[0].means.getArrayElement(c * num_dimensions + d).asFloat() /
+                                            um_clusters[0].N.getArrayElement(c).asFloat());
+                        } else {
+                            um_clusters[0].means.setArrayElement(c * num_dimensions + d, 0.0F);
+                        }
+                        if (DEBUG == 1) System.out.println("\t" + um_clusters[0].means.getArrayElement(c * num_dimensions + d).asString());
+                    }
+                }
+                // ------ OPENMP MASTER END (NUM_GPU == 0) ------
 
-                startTimer(timers.m_step);
+                for (int i = 0; i < num_gpus; i++) {
+                    // memcpy(um_clusters[tid].means, um_clusters[0].means, sizeof( float)*num_clusters * num_dimensions);
+                    memcpy();
+                }
+
                 // Covariance is symmetric, so we only need to compute N*(N+1)/2 matrix elements per cluster
-                dim3 gridDim2 (num_clusters, num_dimensions * (num_dimensions + 1) / 2);
-                //mstep_covariance1<<<gridDim2, NUM_THREADS_MSTEP>>>(d_fcs_data_by_dimension,d_clusters,num_dimensions,num_clusters,my_num_events);
-                mstep_covariance2 << < dim3((num_clusters + NUM_CLUSTERS_PER_BLOCK - 1) / NUM_CLUSTERS_PER_BLOCK, num_dimensions * (num_dimensions + 1) / 2), NUM_THREADS_MSTEP >>> (um_fcs_data_by_dimension, &
-                (um_clusters[tid]), num_dimensions, num_clusters, my_num_events);
-                cudaDeviceSynchronize();
-                stopTimer(timers.m_step);
+                int[] gridDim2 = {(num_clusters + NUM_CLUSTERS_PER_BLOCK - 1) / NUM_CLUSTERS_PER_BLOCK, num_dimensions * (num_dimensions + 1) / 2};
+                for (int i = 0; i < num_gpus; i++) {
+                    //mstep_covariance1<<<gridDim2, NUM_THREADS_MSTEP>>>(d_fcs_data_by_dimension,d_clusters,num_dimensions,num_clusters,my_num_events);
+                    mstep_covariance2.execute(gridDim2, NUM_THREADS_MSTEP)
+                            .execute(um_fcs_data_by_dimension, um_clusters[i].R, um_clusters[i].means,
+                                    um_clusters[i].memberships, um_clusters[i].avgvar, num_dimensions, num_clusters, my_num_events[i]);
+                }
 
                 // Reduce R for all clusters, copy back to device
-                #pragma omp barrier
-                startTimer(timers.cpu);
-                #pragma omp master
-                {
-                    for (int g = 1; g < num_gpus; g++) {
-                        for (int c = 0; c < num_clusters; c++) {
-                            for (int d = 0; d < num_dimensions * num_dimensions; d++) {
-                                um_clusters[0].R[c * num_dimensions * num_dimensions + d] += um_clusters[g].R[c * num_dimensions * num_dimensions + d];
-                            }
+                // ------ OPENMP MASTER START (NUM_GPU == 0) ------
+                for (int g = 1; g < num_gpus; g++) {
+                    for (int c = 0; c < num_clusters; c++) {
+                        for (int d = 0; d < num_dimensions * num_dimensions; d++) {
+                            um_clusters[0].R.setArrayElement(c * num_dimensions * num_dimensions + d,
+                                    um_clusters[0].R.getArrayElement(c * num_dimensions * num_dimensions + d).asFloat() +
+                                            um_clusters[g].R.getArrayElement(c * num_dimensions * num_dimensions + d).asFloat());
                         }
                     }
-                    for (int c = 0; c < num_clusters; c++) {
-                        if (um_clusters[0].N[c] > 0.5f) {
-                            for (int d = 0; d < num_dimensions * num_dimensions; d++) {
-                                um_clusters[0].R[c * num_dimensions * num_dimensions + d] /= um_clusters[0].N[c];
-                            }
-                        } else {
-                            for (int i = 0; i < num_dimensions; i++) {
-                                for (int j = 0; j < num_dimensions; j++) {
-                                    if (i == j) {
-                                        um_clusters[0].R[c * num_dimensions * num_dimensions + i * num_dimensions + j] = 1.0;
-                                    } else {
-                                        um_clusters[0].R[c * num_dimensions * num_dimensions + i * num_dimensions + j] = 0.0;
-                                    }
+                }
+                for (int c = 0; c < num_clusters; c++) {
+                    if (um_clusters[0].N.getArrayElement(c).asFloat() > 0.5F) {
+                        for (int d = 0; d < num_dimensions * num_dimensions; d++) {
+                            um_clusters[0].R.setArrayElement(c * num_dimensions * num_dimensions + d,
+                                    um_clusters[0].R.getArrayElement(c * num_dimensions * num_dimensions + d).asFloat() /
+                                            um_clusters[0].N.getArrayElement(c).asFloat());
+                        }
+                    } else {
+                        for (int i = 0; i < num_dimensions; i++) {
+                            for (int j = 0; j < num_dimensions; j++) {
+                                if (i == j) {
+                                    um_clusters[0].R.setArrayElement(c * num_dimensions * num_dimensions + i * num_dimensions + j, 1.0F);
+                                } else {
+                                    um_clusters[0].R.setArrayElement(c * num_dimensions * num_dimensions + i * num_dimensions + j, 0.0F);
                                 }
                             }
                         }
                     }
                 }
-                #pragma omp barrier
-                stopTimer(timers.cpu);
-                startTimer(timers.memcpy);
-                memcpy(um_clusters[tid].R, um_clusters[0].R, sizeof( float)*
-                num_clusters * num_dimensions * num_dimensions);
-                stopTimer(timers.memcpy);
+                // ------ OPENMP MASTER END (NUM_GPU == 0) ------
 
-                cudaDeviceSynchronize();
-                //CUT_CHECK_ERROR("M-step Kernel execution failed: ");
-                #pragma omp master
-                {
-                    params_iterations++;
+                for (int i = 0; i < num_gpus; i++) {
+                    //memcpy(um_clusters[tid].R, um_clusters[0].R, sizeof(float)*num_clusters * num_dimensions * num_dimensions);
+                    memcpy();
                 }
 
-                DEBUG("Invoking constants kernel.");
+                params_iterations++;
+
+                if (DEBUG == 1) System.out.println("Invoking constants kernel.");
                 // Inverts the R matrices, computes the constant, normalizes cluster probabilities
-                startTimer(timers.constants);
-                constants_kernel << < num_clusters, NUM_THREADS_MSTEP >>> ( & (um_clusters[tid]), num_clusters, num_dimensions)
-                ;
-                cudaDeviceSynchronize();
-
-                #pragma omp master
-                {
-                    for (int temp_c = 0; temp_c < num_clusters; temp_c++)
-                        DEBUG("Cluster %d constant: %e\n", temp_c, um_clusters[tid].constant[temp_c]);
-                }
-                stopTimer(timers.constants);
-                //CUT_CHECK_ERROR("Constants Kernel execution failed: ");
-                #pragma omp master
-                {
-                    constants_iterations++;
+                for (int i = 0; i < num_gpus; i++) {
+                    constants_kernel.execute(num_clusters, NUM_THREADS_MSTEP)
+                            .execute(um_clusters[i].R, um_clusters[i].Rinv, um_clusters[i].constant, um_clusters[i].N, num_clusters, num_dimensions);
                 }
 
-                DEBUG("Invoking regroup (E-step) kernel with %d blocks.\n", NUM_BLOCKS);
-                startTimer(timers.e_step);
+
+                for (int temp_c = 0; temp_c < num_clusters; temp_c++)
+                    if (DEBUG == 1) System.out.println("Cluster " + temp_c +" constant: " + um_clusters[0].constant.getArrayElement(temp_c).asString());
+
+                constants_iterations++;
+
+                if (DEBUG == 1) System.out.println("Invoking regroup (E-step) kernel with " + NUM_BLOCKS + " blocks.");
+
                 // Compute new cluster membership probabilities for all the events
-                estep1 << < dim3(num_clusters, NUM_BLOCKS), NUM_THREADS_ESTEP >>> (um_fcs_data_by_dimension, &
-                (um_clusters[tid]), num_dimensions, my_num_events);
-                estep2 << < NUM_BLOCKS, NUM_THREADS_ESTEP >>> (um_fcs_data_by_dimension, &
-                (um_clusters[tid]), num_dimensions, num_clusters, my_num_events, &shared_likelihoods[tid * NUM_BLOCKS]);
-                cudaDeviceSynchronize();
-                //CUT_CHECK_ERROR("E-step Kernel execution failed: ");
-                stopTimer(timers.e_step);
-                #pragma omp master
-                {
-                    regroup_iterations++;
+                int[] gridDim3 = {num_clusters, NUM_BLOCKS};
+                for (int i = 0; i < num_gpus; i++) {
+                    estep1.execute(gridDim3, NUM_THREADS_ESTEP)
+                            .execute(um_fcs_data_by_dimension, um_clusters[i].means, um_clusters[i].Rinv, um_clusters[i].pi, um_clusters[i].constant, num_dimensions, my_num_events[i]);
+                }
+                for (int i = 0; i < num_gpus; i++) {
+                    estep2.execute(NUM_BLOCKS, NUM_THREADS_ESTEP)
+                            .execute(um_clusters[i].memberships, num_dimensions, num_clusters, my_num_events[i], shared_likelihoods[i * NUM_BLOCKS]);
                 }
 
-                // check if kernel execution generated an error
-                //CUT_CHECK_ERROR("Kernel execution failed");
+                regroup_iterations++;
 
-                #pragma omp barrier
-                startTimer(timers.cpu);
-                #pragma omp master
-                {
-                    likelihood = 0.0;
-                    for (int i = 0; i < NUM_BLOCKS * num_gpus; i++) {
-                        likelihood += shared_likelihoods[i];
-                    }
-                    DEBUG("Likelihood: %e\n", likelihood);
-                }
-                stopTimer(timers.cpu);
-                #pragma omp barrier // synchronize for likelihood
+                // ------ OPENMP MASTER START (NUM_GPU == 0) ------
+                likelihood = 0.0F;
+                for (int i = 0; i < NUM_BLOCKS * num_gpus; i++)
+                    for (int j = 0; j < NUM_BLOCKS; j++)
+                        likelihood += shared_likelihoods[i].getArrayElement(j).asFloat();
 
-                        change = likelihood - old_likelihood;
-                DEBUG("GPU %d, Change in likelihood: %e\n", tid, change);
+                if (DEBUG == 1) System.out.println("Likelihood: " + likelihood);
+                // ------ OPENMP MASTER END (NUM_GPU == 0) ------
+
+                // TODO: Should be change an array per each gpu??
+                change = likelihood - old_likelihood;
+                if (DEBUG == 1) System.out.println("GPU " + 0 + ", Change in likelihood: " + change);
 
                 iters++;
-                #pragma omp barrier // synchronize loop iteration
             }
 
-            DEBUG("GPU %d done with EM loop\n", tid);
+            if (DEBUG == 1) System.out.println("Done with EM loop");
 
-            startTimer(timers.memcpy);
-
-            stopTimer(timers.memcpy);
-            startTimer(timers.cpu);
-            for (int c = 0; c < num_clusters; c++) {
-                memcpy( & (special_memberships[c * num_events + tid * events_per_gpu]), &
-                (um_clusters[tid].memberships[c * my_num_events]), sizeof( float)*my_num_events);
+            for (int i = 0; i < num_gpus; i++) {
+                for (int c = 0; c < num_clusters; c++) {
+                    // memcpy( & (special_memberships[c * num_events + tid * events_per_gpu]), &(um_clusters[tid].memberships[c * my_num_events]), sizeof( float)*my_num_events);
+                    memcpy();
+                }
+                if (DEBUG == 1) System.out.println("GPU " + i + "done with copying cluster data from device");
             }
-            #pragma omp barrier
-            DEBUG("GPU %d done with copying cluster data from device\n", tid);
 
             // Calculate Rissanen Score
-            rissanen = -likelihood + 0.5f * (num_clusters * (1.0f + num_dimensions + 0.5f * (num_dimensions + 1.0f) * num_dimensions) - 1.0f) * logf((float) num_events * num_dimensions);
-            #pragma omp master
-            PRINT("\nLikelihood: %e\n", likelihood);
-            #pragma omp master
-            PRINT("\nRissanen Score: %e\n", rissanen);
+            rissanen = -likelihood + 0.5F * (num_clusters * (1.0F + num_dimensions + 0.5F * (num_dimensions + 1.0F) * num_dimensions) - 1.0F) * (float) Math.log((double) num_events * num_dimensions);
+            if (PRINT == 1) System.out.println("Likelihood: " + likelihood);
+            if (PRINT == 1) System.out.println("Rissanen Score: " + rissanen);
 
-            #pragma omp barrier
-            #pragma omp master
-            {
-                // Save the cluster data the first time through, so we have a base rissanen score and result
-                // Save the cluster data if the solution is better and the user didn't specify a desired number
-                // If the num_clusters equals the desired number, stop
-                if (num_clusters == original_num_clusters || (rissanen < min_rissanen && desired_num_clusters == 0) || (num_clusters == desired_num_clusters)) {
-                    min_rissanen = rissanen;
-                    ideal_num_clusters = num_clusters;
-                    // Save the cluster configuration somewhere
-                    memcpy(saved_clusters -> N, um_clusters[0].N, sizeof( float)*num_clusters);
-                    memcpy(saved_clusters -> pi, um_clusters[0].pi, sizeof( float)*num_clusters);
-                    memcpy(saved_clusters -> constant, um_clusters[0].constant, sizeof( float)*num_clusters);
-                    memcpy(saved_clusters -> avgvar, um_clusters[0].avgvar, sizeof( float)*num_clusters);
-                    memcpy(saved_clusters -> means, um_clusters[0].means, sizeof( float)*num_dimensions * num_clusters);
-                    memcpy(saved_clusters -> R, um_clusters[0].R, sizeof( float)*
-                    num_dimensions * num_dimensions * num_clusters);
-                    memcpy(saved_clusters -> Rinv, um_clusters[0].Rinv, sizeof( float)*
-                    num_dimensions * num_dimensions * num_clusters);
-                    memcpy(saved_clusters -> memberships, special_memberships, sizeof( float)*num_events * num_clusters)
-                    ;
-                }
+            // ------ OPENMP MASTER START (NUM_GPU == 0) ------
+            // Save the cluster data the first time through, so we have a base rissanen score and result
+            // Save the cluster data if the solution is better and the user didn't specify a desired number
+            // If the num_clusters equals the desired number, stop
+            if (num_clusters == original_num_clusters || (rissanen < min_rissanen && desired_num_clusters == 0) || (num_clusters == desired_num_clusters)) {
+                min_rissanen = rissanen;
+                ideal_num_clusters = num_clusters;
+                // Save the cluster configuration somewhere
+                // memcpy(saved_clusters -> N, um_clusters[0].N, sizeof( float)*num_clusters);
+                // memcpy(saved_clusters -> pi, um_clusters[0].pi, sizeof( float)*num_clusters);
+                // memcpy(saved_clusters -> constant, um_clusters[0].constant, sizeof( float)*num_clusters);
+                // memcpy(saved_clusters -> avgvar, um_clusters[0].avgvar, sizeof( float)*num_clusters);
+                // memcpy(saved_clusters -> means, um_clusters[0].means, sizeof( float)*num_dimensions * num_clusters);
+                // memcpy(saved_clusters -> R, um_clusters[0].R, sizeof( float)*num_dimensions * num_dimensions * num_clusters);
+                // memcpy(saved_clusters -> Rinv, um_clusters[0].Rinv, sizeof( float)*num_dimensions * num_dimensions * num_clusters);
+                // memcpy(saved_clusters -> memberships, special_memberships, sizeof( float)*num_events * num_clusters);
+                memcpy();
+                memcpy();
+                memcpy();
+                memcpy();
+                memcpy();
+                memcpy();
+                memcpy();
+                memcpy();
             }
-            #pragma omp barrier
-            stopTimer(timers.cpu);
-            /**************** Reduce GMM Order ********************/
-            startTimer(timers.reduce);
+            // ------ OPENMP MASTER END (NUM_GPU == 0) ------
+
+            // **************** Reduce GMM Order ********************
+
             // Don't want to reduce order on the last iteration
             if (num_clusters > stop_number) {
-                startTimer(timers.cpu);
-                #pragma omp master
-                {
-                    // First eliminate any "empty" clusters
-                    for (int i = num_clusters - 1; i >= 0; i--) {
-                        if (um_clusters[0].N[i] < 0.5) {
-                            DEBUG("Cluster #%d has less than 1 data point in it.\n", i);
-                            for (int j = i; j < num_clusters - 1; j++) {
-                                copy_cluster(um_clusters[0], j, um_clusters[0], j + 1, num_dimensions);
-                            }
-                            num_clusters--;
+                // ------ OPENMP MASTER START (NUM_GPU == 0) ------
+                // First eliminate any "empty" clusters
+                for (int i = num_clusters - 1; i >= 0; i--) {
+                    if (um_clusters[0].N.getArrayElement(i).asFloat() < 0.5) {
+                        if (DEBUG == 1) System.out.println("Cluster #" + i + " has less than 1 data point in it.");
+                        for (int j = i; j < num_clusters - 1; j++) {
+                            //copy_cluster(um_clusters[0], j, um_clusters[0], j + 1, num_dimensions);
+                            copy_cluster();
                         }
-                    }
-
-                    min_c1 = 0;
-                    min_c2 = 1;
-                    DEBUG("Number of non-empty clusters: %d\n", num_clusters);
-                    // For all combinations of subclasses...
-                    // If the number of clusters got really big might need to do a non-exhaustive search
-                    // Even with 100*99/2 combinations this doesn't seem to take too long
-                    for (int c1 = 0; c1 < num_clusters; c1++) {
-                        for (int c2 = c1 + 1; c2 < num_clusters; c2++) {
-                            // compute distance function between the 2 clusters
-                            distance = cluster_distance(um_clusters[0], c1, c2, scratch_cluster, num_dimensions);
-
-                            // Keep track of minimum distance
-                            if ((c1 == 0 && c2 == 1) || distance < min_distance) {
-                                min_distance = distance;
-                                min_c1 = c1;
-                                min_c2 = c2;
-                            }
-                        }
-                    }
-
-                    PRINT("\nMinimum distance between (%d,%d). Combining clusters\n", min_c1, min_c2);
-                    // Add the two clusters with min distance together
-                    //add_clusters(&(clusters[min_c1]),&(clusters[min_c2]),scratch_cluster,num_dimensions);
-                    add_clusters(um_clusters[0], min_c1, min_c2, scratch_cluster, num_dimensions);
-                    // Copy new combined cluster into the main group of clusters, compact them
-                    //copy_cluster(&(clusters[min_c1]),scratch_cluster,num_dimensions);
-                    copy_cluster(um_clusters[0], min_c1, scratch_cluster, 0, num_dimensions);
-                    for (int i = min_c2; i < num_clusters - 1; i++) {
-                        //printf("Copying cluster %d to cluster %d\n",i+1,i);
-                        //copy_cluster(&(clusters[i]),&(clusters[i+1]),num_dimensions);
-                        copy_cluster(um_clusters[0], i, um_clusters[0], i + 1, num_dimensions);
+                        num_clusters--;
                     }
                 }
-                stopTimer(timers.cpu);
-                #pragma omp barrier
 
-                startTimer(timers.memcpy);
+                min_c1 = 0;
+                min_c2 = 1;
+                if (DEBUG == 1) System.out.println("Number of non-empty clusters: " + num_clusters);
+                // For all combinations of subclasses...
+                // If the number of clusters got really big might need to do a non-exhaustive search
+                // Even with 100*99/2 combinations this doesn't seem to take too long
+                for (int c1 = 0; c1 < num_clusters; c1++) {
+                    for (int c2 = c1 + 1; c2 < num_clusters; c2++) {
+                        // compute distance function between the 2 clusters
+                        //distance = cluster_distance(um_clusters[0], c1, c2, scratch_cluster, num_dimensions);
+                        distance = cluster_distance();
+                        // Keep track of minimum distance
+                        if ((c1 == 0 && c2 == 1) || distance < min_distance) {
+                            min_distance = distance;
+                            min_c1 = c1;
+                            min_c2 = c2;
+                        }
+                    }
+                }
+
+                if (PRINT == 1) System.out.println("Minimum distance between (" + min_c1 + ", " + min_c2 + "). Combining clusters");
+                // Add the two clusters with min distance together
+                // add_clusters(&(clusters[min_c1]),&(clusters[min_c2]),scratch_cluster,num_dimensions);
+
+                //add_clusters(um_clusters[0], min_c1, min_c2, scratch_cluster, num_dimensions);
+                add_clusters();
+
+                // Copy new combined cluster into the main group of clusters, compact them
+                //copy_cluster(um_clusters[0], min_c1, scratch_cluster, 0, num_dimensions);
+                copy_cluster();
+
+                for (int i = min_c2; i < num_clusters - 1; i++) {
+                    // System.out.printf("Copying cluster " + (i+1) + " to cluster " + i);
+                    //copy_cluster(um_clusters[0], i, um_clusters[0], i + 1, num_dimensions);
+                    copy_cluster();
+                }
+                // ------ OPENMP MASTER END (NUM_GPU == 0) ------
+
                 // Copy the clusters back to the device
-                memcpy(um_clusters[tid].N, um_clusters[0].N, sizeof( float)*num_clusters);
-                memcpy(um_clusters[tid].pi, um_clusters[0].pi, sizeof( float)*num_clusters);
-                memcpy(um_clusters[tid].constant, um_clusters[0].constant, sizeof( float)*num_clusters);
-                memcpy(um_clusters[tid].avgvar, um_clusters[0].avgvar, sizeof( float)*num_clusters);
-                memcpy(um_clusters[tid].means, um_clusters[0].means, sizeof( float)*num_dimensions * num_clusters);
-                memcpy(um_clusters[tid].R, um_clusters[0].R, sizeof( float)*
-                num_dimensions * num_dimensions * num_clusters);
-                memcpy(um_clusters[tid].Rinv, um_clusters[0].Rinv, sizeof( float)*
-                num_dimensions * num_dimensions * num_clusters);
-                stopTimer(timers.memcpy);
-
-                startTimer(timers.cpu);
-                for (int c = 0; c < num_clusters; c++) {
-                    memcpy( & um_clusters[tid].memberships[c * my_num_events], &
-                    (special_memberships[c * num_events + tid * (num_events / num_gpus)]), sizeof( float)*my_num_events)
-                    ;
+                for (int i = 0; i < num_gpus; i++) {
+                    //memcpy(um_clusters[tid].N, um_clusters[0].N, sizeof( float)*num_clusters);
+                    //memcpy(um_clusters[tid].pi, um_clusters[0].pi, sizeof( float)*num_clusters);
+                    //memcpy(um_clusters[tid].constant, um_clusters[0].constant, sizeof( float)*num_clusters);
+                    //memcpy(um_clusters[tid].avgvar, um_clusters[0].avgvar, sizeof( float)*num_clusters);
+                    //memcpy(um_clusters[tid].means, um_clusters[0].means, sizeof( float)*num_dimensions * num_clusters);
+                    //memcpy(um_clusters[tid].R, um_clusters[0].R, sizeof( float)*num_dimensions * num_dimensions * num_clusters);
+                    //memcpy(um_clusters[tid].Rinv, um_clusters[0].Rinv, sizeof( float)*num_dimensions * num_dimensions * num_clusters);
+                    memcpy();
+                    memcpy();
+                    memcpy();
+                    memcpy();
+                    memcpy();
+                    memcpy();
+                    memcpy();
                 }
-                stopTimer(timers.cpu);
+
+                for (int i = 0; i < num_gpus; i++) {
+                    for (int c = 0; c < num_clusters; c++) {
+                        //memcpy( & um_clusters[tid].memberships[c * my_num_events], &(special_memberships[c * num_events + tid * (num_events / num_gpus)]), sizeof( float)*my_num_events);
+                        memcpy();
+                    }
+                }
             } // GMM reduction block
-            stopTimer(timers.reduce);
-            #pragma omp master
-            {
-                reduce_iterations++;
-            }
 
-            #pragma omp barrier
+            reduce_iterations++;
         } // outer loop from M to 1 clusters
-        #pragma omp master
-        PRINT("\nFinal rissanen Score was: %f, with %d clusters.\n", min_rissanen, ideal_num_clusters);
-        #pragma omp barrier
 
-        auto diff1 = std::chrono::steady_clock::now () - start1;
-        PROFILING("##### Time execution on device %d: %ld micro sec. #####\n", tid, std::chrono::duration_cast < std::chrono::
-        microseconds > (diff1).count());
+        end_exec = System.nanoTime();
 
-        // Print some profiling information
-        printf("GPU %d:\n\tE-step Kernel:\t%7.4f\t%d\t%7.4f\n\tM-step Kernel:\t%7.4f\t%d\t%7.4f\n\tConsts Kernel:\t%7.4f\t%d\t%7.4f\n\tOrder Reduce:\t%7.4f\t%d\t%7.4f\n\tGPU Memcpy:\t%7.4f\n\tCPU:\t\t%7.4f\n", tid, getTimerValue(timers.e_step) / 1000.0, regroup_iterations, (double) getTimerValue(timers.e_step) / (double) regroup_iterations / 1000.0, getTimerValue(timers.m_step) / 1000.0, params_iterations, (double) getTimerValue(timers.m_step) / (double) params_iterations / 1000.0, getTimerValue(timers.constants) / 1000.0, constants_iterations, (double) getTimerValue(timers.constants) / (double) constants_iterations / 1000.0, getTimerValue(timers.reduce) / 1000.0, reduce_iterations, (double) getTimerValue(timers.reduce) / (double) reduce_iterations / 1000.0, getTimerValue(timers.memcpy) / 1000.0, getTimerValue(timers.cpu) / 1000.0);
+        if (PRINT == 1) System.out.println("Final rissanen Score was: " + min_rissanen + ", with " + ideal_num_clusters + "clusters.");
+        if (PROFILING == 1) System.out.println("##### Time execution overall : " + (end_exec - start_exec) * 1000 +" micro sec. #####");
+        // ------ OPENMP START ------
 
-        cleanup_profile_t( & timers);
-
-        free(scratch_cluster.N);
-        free(scratch_cluster.pi);
-        free(scratch_cluster.constant);
-        free(scratch_cluster.avgvar);
-        free(scratch_cluster.means);
-        free(scratch_cluster.R);
-        free(scratch_cluster.Rinv);
-        free(scratch_cluster.memberships);
-
-        // cleanup GPU memory
-
-        CUDA_SAFE_CALL(cudaFree(um_fcs_data_by_event));
-        CUDA_SAFE_CALL(cudaFree(um_fcs_data_by_dimension));
-
-        CUDA_SAFE_CALL(cudaFree(um_clusters[tid].N));
-        CUDA_SAFE_CALL(cudaFree(um_clusters[tid].pi));
-        CUDA_SAFE_CALL(cudaFree(um_clusters[tid].constant));
-        CUDA_SAFE_CALL(cudaFree(um_clusters[tid].avgvar));
-        CUDA_SAFE_CALL(cudaFree(um_clusters[tid].means));
-        CUDA_SAFE_CALL(cudaFree(um_clusters[tid].R));
-        CUDA_SAFE_CALL(cudaFree(um_clusters[tid].Rinv));
-        CUDA_SAFE_CALL(cudaFree(um_clusters[tid].memberships));
-    } // end of parallel block
-
-    CUDA_SAFE_CALL(cudaFree(shared_likelihoods));
-
-    CUDA_SAFE_CALL(cudaFree(um_clusters));
-
-    // main thread cleanup
-    free(fcs_data_by_dimension);
-
-    free(special_memberships);
-
-	*final_num_clusters =ideal_num_clusters;
-            return saved_clusters;
-
+	    final_num_clusters = ideal_num_clusters;
+        return saved_clusters;
     }
 
-    private void memcpy() {}
+    public void memcpy() {}
 
-    private void seed_clusters() {}
+    public void seed_clusters() {}
+
+    public void copy_cluster() {}
+
+    public float cluster_distance() {
+        return 0;
+    }
+
+    public void add_clusters() {}
 
     public static void main(String[]args)throws FileNotFoundException{
             // Getting the context info from a file in json
@@ -771,30 +701,9 @@ public class GMM {
 
         float[]fcs_data_by_event=gmm.readData(fileName);
 
-        cluster_t clusters=gmm.cluster();
+        cluster_t clusters = gmm.cluster(original_num_clusters, desired_num_clusters, fcs_data_by_event);
 
         // TODO: print the results
-    }
-
-    class cluster_t {
-        float[] N;
-        float[] pi;
-        float[] constant;
-        float[] avgvar;
-        float[] means;
-        float[] R;
-        float[] Rinv;
-        float[] memberships;
-    }
-
-    class cluster_um {
-        Value N;
-        Value pi;
-        Value constant;
-        Value means;
-        Value R;
-        Value Rinv;
-        Value memberships;
     }
 
     private Context createContext(Config config) {
@@ -819,4 +728,26 @@ public class GMM {
                 .option("grcuda.BandwidthMatrix", config.bandwidthMatrix)
                 .build();
     }
+}
+
+class cluster_t{
+    float[] N;
+    float[] pi;
+    float[] constant;
+    float[] avgvar;
+    float[] means;
+    float[] R;
+    float[] Rinv;
+    float[] memberships;
+}
+
+class cluster_um {
+    Value N;
+    Value pi;
+    Value constant;
+    Value avgvar;
+    Value means;
+    Value R;
+    Value Rinv;
+    Value memberships;
 }
