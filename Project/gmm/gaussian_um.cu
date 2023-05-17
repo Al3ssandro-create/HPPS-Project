@@ -400,7 +400,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             DEBUG("Invoking E-step kernels.");
             startTimer(timers.e_step);
             estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(um_clusters[tid]), num_dimensions, my_num_events);
-            estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(um_clusters[tid]), num_dimensions, num_clusters, my_num_events, &shared_likelihoods[tid*NUM_BLOCKS]);
+            estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(&(um_clusters[tid]), num_dimensions, num_clusters, my_num_events, &shared_likelihoods[tid*NUM_BLOCKS]);
             cudaDeviceSynchronize();
             #pragma omp master
             {
@@ -574,7 +574,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 startTimer(timers.e_step);
                 // Compute new cluster membership probabilities for all the events
                 estep1<<<dim3(num_clusters,NUM_BLOCKS), NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(um_clusters[tid]), num_dimensions, my_num_events);
-                estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(um_fcs_data_by_dimension, &(um_clusters[tid]), num_dimensions, num_clusters, my_num_events, &shared_likelihoods[tid*NUM_BLOCKS]);
+                estep2<<<NUM_BLOCKS, NUM_THREADS_ESTEP>>>(&(um_clusters[tid]), num_dimensions, num_clusters, my_num_events, &shared_likelihoods[tid*NUM_BLOCKS]);
                 cudaDeviceSynchronize();
                 //CUT_CHECK_ERROR("E-step Kernel execution failed: ");
                 stopTimer(timers.e_step);

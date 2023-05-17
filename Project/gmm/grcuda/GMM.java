@@ -328,7 +328,7 @@ public class GMM {
         }
 
         // Calculate an epsilon value
-        float epsilon = (1 + num_dimensions + 0.5f * (num_dimensions + 1) * num_dimensions) * (float) Math.log((double) num_events * num_dimensions) * 0.001f;
+        float epsilon = (1 + num_dimensions + 0.5F * (num_dimensions + 1) * num_dimensions) * (float) Math.log((double) num_events * num_dimensions) * 0.001F;
         int iters;
 
         //epsilon = 1e-6;
@@ -627,7 +627,7 @@ public class GMM {
 
         end_exec = System.nanoTime();
 
-        if (PRINT == 1) System.out.println("Final rissanen Score was: " + min_rissanen + ", with " + ideal_num_clusters + " clusters. (Right one (MultiGPU): 986243,625; )");
+        if (PRINT == 1) System.out.println("Final rissanen Score was: " + min_rissanen + ", with " + ideal_num_clusters + " clusters. (Right one: -MultiGPU: 986243,625; -SigleGPU: 986241.125)");
         if (PROFILING == 1) System.out.println("##### Time execution overall : " + (end_exec - start_exec) * 1000 +" micro sec. #####");
         // ------ OPENMP START ------
 
