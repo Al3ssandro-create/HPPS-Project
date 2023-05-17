@@ -6,6 +6,7 @@ import com.google.gson.stream.JsonReader;
 
 import java.io.*;
 import java.util.ArrayList;
+import java.util.Random;
 import java.util.Scanner;
 
 public class GMM {
@@ -13,8 +14,9 @@ public class GMM {
 
     private int TRUNCATE = 1;
     private int PRINT = 1;
-    private int DEBUG = 1;
-    private int PROFILING = 1;
+    private int DEBUG = 0;
+    private int PROFILING = 0;
+    private int UNIFORM_SEED = 0;
     private int NUM_BLOCKS = 24;
     private int NUM_CLUSTERS_PER_BLOCK = 6;
     private int NUM_THREADS_MSTEP = 256;
@@ -169,11 +171,12 @@ public class GMM {
 
         if (PRINT == 1) System.out.println("Number of events: " + num_events);
         if (PRINT == 1) System.out.println("Number of dimensions: " + num_dimensions);
-        if (PRINT == 1) System.out.println("Starting with " + original_num_clusters + "cluster(s), will stop at " + stop_number + " cluster(s).");
+        if (PRINT == 1) System.out.println("Starting with " + original_num_clusters + " cluster(s), will stop at " + stop_number + " cluster(s).");
 
         // Setup the cluster data structures on host
         // This the shared memory space between the GPUs
         cluster_um[] um_clusters = new cluster_um[num_gpus];
+        for (int i = 0; i < num_gpus; i ++) um_clusters[i] = new cluster_um();
 
         // Only need one copy of all the memberships
         float[] special_memberships = new float[num_events * original_num_clusters];
@@ -191,24 +194,26 @@ public class GMM {
 
         if (DEBUG == 1) System.out.println("Finished allocating shared cluster structures on host");
 
-        // TODO: Probably we can do an array of size num gpus (normal) and then each el is a Value of NUM_BLOCK size
+        // TODO: fix gaussian_um
         // Used to hold the result from regroup kernel
-        Value[] shared_likelihoods = new Value[NUM_BLOCKS * num_gpus];
+        Value[] shared_likelihoods = new Value[num_gpus];
+        for (int i = 0; i < num_gpus; i++)
+            shared_likelihoods[i] = context.eval("grcuda", "float["+ NUM_BLOCKS+"]");
         float likelihood, old_likelihood;
         float min_rissanen = 0;
 
         // ------ OPENMP START ------
 
-        // TODO: check here the size, they are different from 'saved_clusters'
+        // TODO: check here the size, they are different from 'saved_clusters' --> fixed unified memory
         cluster_t scratch_cluster = new cluster_t();
-        scratch_cluster.N = new float[1];
-        scratch_cluster.pi = new float[1];
-        scratch_cluster.constant = new float[1];
-        scratch_cluster.avgvar = new float[1];
-        scratch_cluster.means = new float[num_dimensions];
-        scratch_cluster.R = new float[num_dimensions * num_dimensions];
-        scratch_cluster.Rinv = new float[num_dimensions * num_dimensions];
-        scratch_cluster.memberships = new float[num_events];
+        scratch_cluster.N = new float[original_num_clusters];
+        scratch_cluster.pi = new float[original_num_clusters];
+        scratch_cluster.constant = new float[original_num_clusters];
+        scratch_cluster.avgvar = new float[original_num_clusters];
+        scratch_cluster.means = new float[num_dimensions * original_num_clusters];
+        scratch_cluster.R = new float[num_dimensions * num_dimensions * original_num_clusters];
+        scratch_cluster.Rinv = new float[num_dimensions * num_dimensions * original_num_clusters];
+        scratch_cluster.memberships = new float[num_events * original_num_clusters];
 
         if (DEBUG == 1) System.out.println("Finished allocating memory on host for clusters.");
 
@@ -251,15 +256,13 @@ public class GMM {
         }
 
         for (int i = 0; i<num_gpus; i++) {
-            //memcpy(um_fcs_data_by_event, &fcs_data_by_event[num_dimensions*events_per_gpu*i], mem_size[i]);
-            memcpy();
+            memcpy(um_fcs_data_by_event[i], fcs_data_by_event, 0, num_dimensions*events_per_gpu*i, mem_size[i]);
         }
 
         // Copying the transposed data is trickier since it's not all contigious for the relavant events
         for (int i = 0; i < num_gpus; i++) {
             for (int d = 0; d < num_dimensions; d++) {
-                //memcpy( &um_fcs_data_by_dimension[d * my_num_events], &fcs_data_by_dimension[d * num_events + tid * events_per_gpu], sizeof( float)*my_num_events);
-                memcpy();
+                memcpy(um_fcs_data_by_dimension[i], fcs_data_by_dimension, d * my_num_events[i], d * num_events + i * events_per_gpu, my_num_events[i]);
             }
             if (DEBUG == 1) System.out.println("GPU " + i + ": Finished copying FCS data to device.");
         }
@@ -278,12 +281,12 @@ public class GMM {
         if (DEBUG == 1) System.out.println("Invoking constants kernel.");
             // Computes the R matrix inverses, and the gaussian constant
         constants_kernel.execute(original_num_clusters, NUM_THREADS_MSTEP)
-                .execute(um_clusters[0].R, um_clusters[0].Rinv, um_clusters[0].constant, um_clusters[0].pi, original_num_clusters, num_dimensions);
+                .execute(um_clusters[0].R, um_clusters[0].Rinv, um_clusters[0].constant, um_clusters[0].N, um_clusters[0].pi, original_num_clusters, num_dimensions);
 
         constants_iterations++;
 
         //seed_clusters( & um_clusters[0], fcs_data_by_event, original_num_clusters, num_dimensions, num_events);
-        seed_clusters();
+        seed_clusters(um_clusters[0],fcs_data_by_dimension,original_num_clusters, num_dimensions, num_events);
 
         if (DEBUG == 1) System.out.println("Starting Clusters");
         for (int c = 0; c < original_num_clusters; c++) {
@@ -314,21 +317,14 @@ public class GMM {
         // ------ OPENMP MASTER END (NUM_GPU == 0) ------
 
         // Synchronize after first gpu does the seeding, copy result to all gpus
-        for (int i = 0; i < num_gpus; i++) {
-            //memcpy(um_clusters[tid].N, um_clusters[0].N, sizeof( float)*original_num_clusters);
-            //memcpy(um_clusters[tid].pi, um_clusters[0].pi, sizeof( float)*original_num_clusters);
-            //memcpy(um_clusters[tid].constant, um_clusters[0].constant, sizeof( float)*original_num_clusters);
-            //memcpy(um_clusters[tid].avgvar, um_clusters[0].avgvar, sizeof( float)*original_num_clusters);
-            //memcpy(um_clusters[tid].means, um_clusters[0].means, sizeof( float)*num_dimensions * original_num_clusters);
-            //memcpy(um_clusters[tid].R, um_clusters[0].R, sizeof( float)*num_dimensions * num_dimensions * original_num_clusters);
-            //memcpy(um_clusters[tid].Rinv, um_clusters[0].Rinv, sizeof( float)*num_dimensions * num_dimensions * original_num_clusters);
-            memcpy();
-            memcpy();
-            memcpy();
-            memcpy();
-            memcpy();
-            memcpy();
-            memcpy();
+        for (int i = 1; i < num_gpus; i++) {
+            memcpy(um_clusters[i].N, um_clusters[0].N, 0, 0, original_num_clusters);
+            memcpy(um_clusters[i].pi, um_clusters[0].pi, 0, 0, original_num_clusters);
+            memcpy(um_clusters[i].constant, um_clusters[0].constant, 0, 0, original_num_clusters);
+            memcpy(um_clusters[i].avgvar, um_clusters[0].avgvar, 0, 0, original_num_clusters);
+            memcpy(um_clusters[i].means, um_clusters[0].means, 0, 0, num_dimensions * original_num_clusters);
+            memcpy(um_clusters[i].R, um_clusters[0].R, 0, 0, num_dimensions * num_dimensions * original_num_clusters);
+            memcpy(um_clusters[i].Rinv, um_clusters[0].Rinv, 0, 0, num_dimensions * num_dimensions * original_num_clusters);
         }
 
         // Calculate an epsilon value
@@ -360,7 +356,7 @@ public class GMM {
             }
             for (int i = 0; i < num_gpus; i++) {
                 estep2.execute(NUM_BLOCKS, NUM_THREADS_ESTEP)
-                        .execute(um_clusters[i].memberships, num_dimensions, num_clusters, my_num_events[i], shared_likelihoods[i * NUM_BLOCKS]);
+                        .execute(um_clusters[i].memberships, num_dimensions, num_clusters, my_num_events[i], shared_likelihoods[i]);
             }
             regroup_iterations++;
 
@@ -373,7 +369,7 @@ public class GMM {
 
             float change = epsilon * 2;
 
-            if (PRINT == 1) System.out.println("Performing EM algorithm on" + num_clusters + "clusters.");
+            if (PRINT == 1) System.out.println("Performing EM algorithm on " + num_clusters + " clusters.");
             iters = 0;
             // This is the iterative loop for the EM algorithm.
             // It re-estimates parameters, re-computes constants, and then regroups the events
@@ -396,9 +392,8 @@ public class GMM {
                     }
                 }
 
-                for (int i = 0; i < num_gpus; i++) {
-                    //memcpy(um_clusters[tid].N, um_clusters[0].N, sizeof( float)*num_clusters);
-                    memcpy();
+                for (int i = 1; i < num_gpus; i++) {
+                    memcpy(um_clusters[i].N, um_clusters[0].N, 0, 0, num_clusters);
                 }
 
                 int[] gridDim1 = {num_clusters, num_dimensions};
@@ -434,8 +429,7 @@ public class GMM {
                 // ------ OPENMP MASTER END (NUM_GPU == 0) ------
 
                 for (int i = 0; i < num_gpus; i++) {
-                    // memcpy(um_clusters[tid].means, um_clusters[0].means, sizeof( float)*num_clusters * num_dimensions);
-                    memcpy();
+                    memcpy(um_clusters[i].means, um_clusters[0].means, 0, 0, num_clusters * num_dimensions);
                 }
 
                 // Covariance is symmetric, so we only need to compute N*(N+1)/2 matrix elements per cluster
@@ -443,7 +437,7 @@ public class GMM {
                 for (int i = 0; i < num_gpus; i++) {
                     //mstep_covariance1<<<gridDim2, NUM_THREADS_MSTEP>>>(d_fcs_data_by_dimension,d_clusters,num_dimensions,num_clusters,my_num_events);
                     mstep_covariance2.execute(gridDim2, NUM_THREADS_MSTEP)
-                            .execute(um_fcs_data_by_dimension, um_clusters[i].R, um_clusters[i].means,
+                            .execute(um_fcs_data_by_dimension[i], um_clusters[i].R, um_clusters[i].means,
                                     um_clusters[i].memberships, um_clusters[i].avgvar, num_dimensions, num_clusters, my_num_events[i]);
                 }
 
@@ -479,9 +473,8 @@ public class GMM {
                 }
                 // ------ OPENMP MASTER END (NUM_GPU == 0) ------
 
-                for (int i = 0; i < num_gpus; i++) {
-                    //memcpy(um_clusters[tid].R, um_clusters[0].R, sizeof(float)*num_clusters * num_dimensions * num_dimensions);
-                    memcpy();
+                for (int i = 1; i < num_gpus; i++) {
+                    memcpy(um_clusters[i].R, um_clusters[0].R, 0, 0, num_clusters * num_dimensions * num_dimensions);
                 }
 
                 params_iterations++;
@@ -490,9 +483,8 @@ public class GMM {
                 // Inverts the R matrices, computes the constant, normalizes cluster probabilities
                 for (int i = 0; i < num_gpus; i++) {
                     constants_kernel.execute(num_clusters, NUM_THREADS_MSTEP)
-                            .execute(um_clusters[i].R, um_clusters[i].Rinv, um_clusters[i].constant, um_clusters[i].N, num_clusters, num_dimensions);
+                            .execute(um_clusters[i].R, um_clusters[i].Rinv, um_clusters[i].constant, um_clusters[i].N, um_clusters[i].pi, num_clusters, num_dimensions);
                 }
-
 
                 for (int temp_c = 0; temp_c < num_clusters; temp_c++)
                     if (DEBUG == 1) System.out.println("Cluster " + temp_c +" constant: " + um_clusters[0].constant.getArrayElement(temp_c).asString());
@@ -505,18 +497,18 @@ public class GMM {
                 int[] gridDim3 = {num_clusters, NUM_BLOCKS};
                 for (int i = 0; i < num_gpus; i++) {
                     estep1.execute(gridDim3, NUM_THREADS_ESTEP)
-                            .execute(um_fcs_data_by_dimension, um_clusters[i].means, um_clusters[i].Rinv, um_clusters[i].pi, um_clusters[i].constant, num_dimensions, my_num_events[i]);
+                            .execute(um_fcs_data_by_dimension[i], um_clusters[i].means, um_clusters[i].Rinv, um_clusters[i].pi, um_clusters[i].constant, um_clusters[i].memberships, num_dimensions, my_num_events[i]);
                 }
                 for (int i = 0; i < num_gpus; i++) {
                     estep2.execute(NUM_BLOCKS, NUM_THREADS_ESTEP)
-                            .execute(um_clusters[i].memberships, num_dimensions, num_clusters, my_num_events[i], shared_likelihoods[i * NUM_BLOCKS]);
+                            .execute(um_clusters[i].memberships, num_dimensions, num_clusters, my_num_events[i], shared_likelihoods[i]);
                 }
 
                 regroup_iterations++;
 
                 // ------ OPENMP MASTER START (NUM_GPU == 0) ------
                 likelihood = 0.0F;
-                for (int i = 0; i < NUM_BLOCKS * num_gpus; i++)
+                for (int i = 0; i < num_gpus; i++)
                     for (int j = 0; j < NUM_BLOCKS; j++)
                         likelihood += shared_likelihoods[i].getArrayElement(j).asFloat();
 
@@ -534,8 +526,7 @@ public class GMM {
 
             for (int i = 0; i < num_gpus; i++) {
                 for (int c = 0; c < num_clusters; c++) {
-                    // memcpy( & (special_memberships[c * num_events + tid * events_per_gpu]), &(um_clusters[tid].memberships[c * my_num_events]), sizeof( float)*my_num_events);
-                    memcpy();
+                    memcpy(special_memberships, um_clusters[i].memberships, c * num_events + i * events_per_gpu, c * my_num_events[i], my_num_events[i]);
                 }
                 if (DEBUG == 1) System.out.println("GPU " + i + "done with copying cluster data from device");
             }
@@ -553,22 +544,14 @@ public class GMM {
                 min_rissanen = rissanen;
                 ideal_num_clusters = num_clusters;
                 // Save the cluster configuration somewhere
-                // memcpy(saved_clusters -> N, um_clusters[0].N, sizeof( float)*num_clusters);
-                // memcpy(saved_clusters -> pi, um_clusters[0].pi, sizeof( float)*num_clusters);
-                // memcpy(saved_clusters -> constant, um_clusters[0].constant, sizeof( float)*num_clusters);
-                // memcpy(saved_clusters -> avgvar, um_clusters[0].avgvar, sizeof( float)*num_clusters);
-                // memcpy(saved_clusters -> means, um_clusters[0].means, sizeof( float)*num_dimensions * num_clusters);
-                // memcpy(saved_clusters -> R, um_clusters[0].R, sizeof( float)*num_dimensions * num_dimensions * num_clusters);
-                // memcpy(saved_clusters -> Rinv, um_clusters[0].Rinv, sizeof( float)*num_dimensions * num_dimensions * num_clusters);
-                // memcpy(saved_clusters -> memberships, special_memberships, sizeof( float)*num_events * num_clusters);
-                memcpy();
-                memcpy();
-                memcpy();
-                memcpy();
-                memcpy();
-                memcpy();
-                memcpy();
-                memcpy();
+                memcpy(saved_clusters.N, um_clusters[0].N, 0, 0, num_clusters);
+                memcpy(saved_clusters.pi, um_clusters[0].pi, 0, 0, num_clusters);
+                memcpy(saved_clusters.constant, um_clusters[0].constant, 0, 0, num_clusters);
+                memcpy(saved_clusters.avgvar, um_clusters[0].avgvar, 0, 0, num_clusters);
+                memcpy(saved_clusters.means, um_clusters[0].means, 0, 0, num_dimensions * num_clusters);
+                memcpy(saved_clusters.R, um_clusters[0].R, 0,0, num_dimensions * num_dimensions * num_clusters);
+                memcpy(saved_clusters.Rinv, um_clusters[0].Rinv, 0, 0, num_dimensions * num_dimensions * num_clusters);
+                memcpy(saved_clusters.memberships, special_memberships, 0, 0,num_events * num_clusters);
             }
             // ------ OPENMP MASTER END (NUM_GPU == 0) ------
 
@@ -583,7 +566,7 @@ public class GMM {
                         if (DEBUG == 1) System.out.println("Cluster #" + i + " has less than 1 data point in it.");
                         for (int j = i; j < num_clusters - 1; j++) {
                             //copy_cluster(um_clusters[0], j, um_clusters[0], j + 1, num_dimensions);
-                            copy_cluster();
+                            copy_cluster(um_clusters[0], j, um_clusters[0], j+1 , num_dimensions);
                         }
                         num_clusters--;
                     }
@@ -598,8 +581,7 @@ public class GMM {
                 for (int c1 = 0; c1 < num_clusters; c1++) {
                     for (int c2 = c1 + 1; c2 < num_clusters; c2++) {
                         // compute distance function between the 2 clusters
-                        //distance = cluster_distance(um_clusters[0], c1, c2, scratch_cluster, num_dimensions);
-                        distance = cluster_distance();
+                        distance = cluster_distance(um_clusters[0], c1, c2, scratch_cluster, num_dimensions);
                         // Keep track of minimum distance
                         if ((c1 == 0 && c2 == 1) || distance < min_distance) {
                             min_distance = distance;
@@ -611,44 +593,31 @@ public class GMM {
 
                 if (PRINT == 1) System.out.println("Minimum distance between (" + min_c1 + ", " + min_c2 + "). Combining clusters");
                 // Add the two clusters with min distance together
-                // add_clusters(&(clusters[min_c1]),&(clusters[min_c2]),scratch_cluster,num_dimensions);
-
-                //add_clusters(um_clusters[0], min_c1, min_c2, scratch_cluster, num_dimensions);
-                add_clusters();
+                add_clusters(um_clusters[0], min_c1, min_c2, scratch_cluster, num_dimensions);
 
                 // Copy new combined cluster into the main group of clusters, compact them
-                //copy_cluster(um_clusters[0], min_c1, scratch_cluster, 0, num_dimensions);
-                copy_cluster();
+                copy_cluster(um_clusters[0],min_c1,scratch_cluster,0,num_dimensions);
 
                 for (int i = min_c2; i < num_clusters - 1; i++) {
                     // System.out.printf("Copying cluster " + (i+1) + " to cluster " + i);
-                    //copy_cluster(um_clusters[0], i, um_clusters[0], i + 1, num_dimensions);
-                    copy_cluster();
+                    copy_cluster(um_clusters[0],i,um_clusters[0],i + 1, num_dimensions);
                 }
                 // ------ OPENMP MASTER END (NUM_GPU == 0) ------
 
                 // Copy the clusters back to the device
-                for (int i = 0; i < num_gpus; i++) {
-                    //memcpy(um_clusters[tid].N, um_clusters[0].N, sizeof( float)*num_clusters);
-                    //memcpy(um_clusters[tid].pi, um_clusters[0].pi, sizeof( float)*num_clusters);
-                    //memcpy(um_clusters[tid].constant, um_clusters[0].constant, sizeof( float)*num_clusters);
-                    //memcpy(um_clusters[tid].avgvar, um_clusters[0].avgvar, sizeof( float)*num_clusters);
-                    //memcpy(um_clusters[tid].means, um_clusters[0].means, sizeof( float)*num_dimensions * num_clusters);
-                    //memcpy(um_clusters[tid].R, um_clusters[0].R, sizeof( float)*num_dimensions * num_dimensions * num_clusters);
-                    //memcpy(um_clusters[tid].Rinv, um_clusters[0].Rinv, sizeof( float)*num_dimensions * num_dimensions * num_clusters);
-                    memcpy();
-                    memcpy();
-                    memcpy();
-                    memcpy();
-                    memcpy();
-                    memcpy();
-                    memcpy();
+                for (int i = 1; i < num_gpus; i++) {
+                    memcpy(um_clusters[i].N, um_clusters[0].N, 0, 0, num_clusters);
+                    memcpy(um_clusters[i].pi, um_clusters[0].pi, 0, 0, num_clusters);
+                    memcpy(um_clusters[i].constant, um_clusters[0].constant, 0, 0, num_clusters);
+                    memcpy(um_clusters[i].avgvar, um_clusters[0].avgvar, 0, 0, num_clusters);
+                    memcpy(um_clusters[i].means, um_clusters[0].means, 0, 0, num_dimensions * num_clusters);
+                    memcpy(um_clusters[i].R, um_clusters[0].R, 0, 0, num_dimensions * num_dimensions * num_clusters);
+                    memcpy(um_clusters[i].Rinv, um_clusters[0].Rinv, 0, 0, num_dimensions * num_dimensions * num_clusters);
                 }
 
                 for (int i = 0; i < num_gpus; i++) {
                     for (int c = 0; c < num_clusters; c++) {
-                        //memcpy( & um_clusters[tid].memberships[c * my_num_events], &(special_memberships[c * num_events + tid * (num_events / num_gpus)]), sizeof( float)*my_num_events);
-                        memcpy();
+                        memcpy(um_clusters[i].memberships, special_memberships, c * my_num_events[i], c * num_events + i * (num_events / num_gpus), my_num_events[i]);
                     }
                 }
             } // GMM reduction block
@@ -658,7 +627,7 @@ public class GMM {
 
         end_exec = System.nanoTime();
 
-        if (PRINT == 1) System.out.println("Final rissanen Score was: " + min_rissanen + ", with " + ideal_num_clusters + "clusters.");
+        if (PRINT == 1) System.out.println("Final rissanen Score was: " + min_rissanen + ", with " + ideal_num_clusters + " clusters. (Right one (MultiGPU): 986243,625; )");
         if (PROFILING == 1) System.out.println("##### Time execution overall : " + (end_exec - start_exec) * 1000 +" micro sec. #####");
         // ------ OPENMP START ------
 
@@ -666,18 +635,192 @@ public class GMM {
         return saved_clusters;
     }
 
-    public void memcpy() {}
-
-    public void seed_clusters() {}
-
-    public void copy_cluster() {}
-
-    public float cluster_distance() {
-        return 0;
+    public void memcpy(Value dest, float[] src, int startDest, int startSrc, int size) {
+        for (int i = 0; i < size; i ++) {
+            dest.setArrayElement(startDest + i, src[startSrc + i]);
+        }
     }
 
-    public void add_clusters() {}
+    public void memcpy(Value dest, Value src, int startDest, int startSrc, int size) {
+        for (int i = 0; i < size; i ++) {
+            dest.setArrayElement(startDest + i, src.getArrayElement(startSrc + i));
+        }
+    }
 
+    public void memcpy(float[] dest, Value src, int startDest, int startSrc, int size) {
+        for (int i = 0; i < size; i ++) {
+            dest[startDest + i] = src.getArrayElement(startSrc + i).asFloat();
+        }
+    }
+
+    public void memcpy(float[] dest, float[] src, int startDest, int startSrc, int size) {
+        for (int i = 0; i < size; i ++) {
+            dest[startDest + i] = src[startSrc + i];
+        }
+    }
+
+    public void seed_clusters(cluster_um clusters, float[] fcs_data, int num_clusters, int num_dimensions, int num_event){
+        float fraction;
+        int seed;
+        if(num_clusters > 1){
+            fraction = (num_event - 1.0f)/(num_clusters - 1.0f);
+        }else{
+            fraction = 0.0F;
+        }
+        Random random = new Random(0);
+        //Sets the means from evenly distributed points in the input data
+        for(int c = 0; c > num_clusters; c++){
+            clusters.N.setArrayElement(c,(float)num_event/(float)num_clusters);
+            if(UNIFORM_SEED == 1){
+                for(int d = 0; d < num_dimensions; d++)
+                        clusters.means.setArrayElement(c * num_dimensions + d, fcs_data[((int)(c * fraction)) * num_dimensions + d]);
+            }else{
+                seed = random.nextInt();
+                if(DEBUG == 1) System.out.println("Cluster" + c + "seed = event #" + seed);
+                for(int d = 0; d <num_dimensions; d++)
+                    clusters.means.setArrayElement(c * num_dimensions + d, fcs_data[seed * num_dimensions +d]);
+            }
+        }
+    }
+
+    public void copy_cluster(cluster_um dest, int c_dest, cluster_um src, int c_src, int num_dimensions) {
+        dest.N.setArrayElement(c_dest, src.N.getArrayElement(c_src).asFloat());
+        dest.pi.setArrayElement(c_dest, src.pi.getArrayElement(c_src).asFloat());
+        dest.constant.setArrayElement(c_dest, src.constant.getArrayElement(c_src).asFloat());
+        dest.avgvar.setArrayElement(c_dest, src.avgvar.getArrayElement(c_src).asFloat());
+
+        memcpy(dest.means, src.means, c_dest * num_dimensions, c_src * num_dimensions, num_dimensions);
+        memcpy(dest.R, src.R, c_dest * num_dimensions * num_dimensions, c_src * num_dimensions * num_dimensions, num_dimensions * num_dimensions);
+        memcpy(dest.Rinv, src.Rinv, c_dest * num_dimensions * num_dimensions, c_src * num_dimensions * num_dimensions, num_dimensions * num_dimensions);
+    }
+    public void copy_cluster(cluster_um dest, int c_dest, cluster_t src, int c_src, int num_dimensions) {
+        dest.N.setArrayElement(c_dest, src.N[c_src]);
+        dest.pi.setArrayElement(c_dest, src.pi[c_src]);
+        dest.constant.setArrayElement(c_dest, src.constant[c_src]);
+        dest.avgvar.setArrayElement(c_dest, src.avgvar[c_src]);
+
+        memcpy(dest.means, src.means, c_dest*num_dimensions, c_src*num_dimensions, num_dimensions);
+        memcpy(dest.R, src.R, c_dest * num_dimensions * num_dimensions, c_src * num_dimensions * num_dimensions, num_dimensions * num_dimensions);
+        memcpy(dest.Rinv, src.Rinv, c_dest * num_dimensions * num_dimensions, c_src * num_dimensions * num_dimensions, num_dimensions * num_dimensions);
+    }
+
+
+    public float cluster_distance(cluster_um clusters, int c1, int c2, cluster_t temp_cluster, int num_dimensions) {
+        add_clusters(clusters, c1, c2, temp_cluster, num_dimensions);
+        return clusters.N.getArrayElement(c1).asFloat()*clusters.constant.getArrayElement(c1).asFloat() + clusters.N.getArrayElement(c2).asFloat()*clusters.constant.getArrayElement(c2).asFloat() - temp_cluster.N[0]*temp_cluster.constant[0];
+    }
+
+    public void add_clusters(cluster_um clusters, int c1 , int c2, cluster_t temp_cluster, int num_dimensions) {
+        float wt1,wt2;
+
+        wt1 = (clusters.N.getArrayElement(c1)).asFloat() / (clusters.N.getArrayElement(c1).asFloat() + clusters.N.getArrayElement(c2).asFloat());
+        wt2 = 1.0f - wt1;
+
+        // Compute new weighted means
+        for(int i=0; i<num_dimensions; i++) {
+            temp_cluster.means[i] = wt1*clusters.means.getArrayElement(c1*num_dimensions+i).asFloat() + wt2*clusters.means.getArrayElement(c2*num_dimensions+i).asFloat();
+        }
+
+        // Compute new weighted covariance
+        for(int i=0; i<num_dimensions; i++) {
+            for(int j=i; j<num_dimensions; j++) {
+                // Compute R contribution from cluster1
+                temp_cluster.R[i*num_dimensions+j] = ((temp_cluster.means[i]-clusters.means.getArrayElement(c1*num_dimensions+i).asFloat())
+                        *(temp_cluster.means[j]-clusters.means.getArrayElement(c1*num_dimensions+j).asFloat())
+                        +clusters.R.getArrayElement(c1*num_dimensions*num_dimensions+i*num_dimensions+j).asFloat())*wt1;
+                // Add R contribution from cluster2
+                temp_cluster.R[i*num_dimensions+j] += ((temp_cluster.means[i]-clusters.means.getArrayElement(c2*num_dimensions+i).asFloat())
+                        *(temp_cluster.means[j]-clusters.means.getArrayElement(c2*num_dimensions+j).asFloat())
+                        +clusters.R.getArrayElement(c2*num_dimensions*num_dimensions+i*num_dimensions+j).asFloat())*wt2;
+                // Because its symmetric...
+                temp_cluster.R[j*num_dimensions+i] = temp_cluster.R[i*num_dimensions+j];
+            }
+        }
+
+        // Compute pi
+        temp_cluster.pi[0] = clusters.pi.getArrayElement(c1).asFloat() + clusters.pi.getArrayElement(c2).asFloat();
+
+        // compute N
+        temp_cluster.N[0] = clusters.N.getArrayElement(c1).asFloat() + clusters.N.getArrayElement(c2).asFloat();
+
+        // Copy R to Rinv matrix
+        memcpy(temp_cluster.Rinv,temp_cluster.R, 0, 0, num_dimensions*num_dimensions);
+        // Invert the matrix
+        float log_determinant = invert_cpu(temp_cluster.Rinv,num_dimensions);
+        // Compute the constant
+        temp_cluster.constant[0] = (-num_dimensions) * 0.5F * ((float) Math.log(2.0F * Math.PI)) - 0.5f * log_determinant;
+
+        // avgvar same for all clusters
+        temp_cluster.avgvar[0] = clusters.avgvar.getArrayElement(0).asFloat();
+    }
+
+    public float invert_cpu(float[] data, int actualsize){
+        float log_determinant = 0.0F;
+        int maxsize = actualsize;
+        int n = actualsize;
+        if (actualsize == 1) { // special case, dimensionality == 1
+        log_determinant =(float) Math.log(data[0]);
+            data[0] = (float) (1.0 / data[0]);
+        } else if(actualsize >= 2) { // dimensionality >= 2
+            for (int i=1; i < actualsize; i++) data[i] /= data[0]; // normalize row 0
+            for (int i=1; i < actualsize; i++)  {
+                for (int j=i; j < actualsize; j++)  { // do a column of L
+                    float sum = 0.0F;
+                    for (int k = 0; k < i; k++)
+                        sum += data[j*maxsize+k] * data[k*maxsize+i];
+                    data[j*maxsize+i] -= sum;
+                }
+                if (i == actualsize-1) continue;
+                for (int j=i+1; j < actualsize; j++)  {  // do a row of U
+                    float sum = 0.0F;
+                    for (int k = 0; k < i; k++)
+                        sum += data[i*maxsize+k]*data[k*maxsize+j];
+                    data[i*maxsize+j] =
+                            (data[i*maxsize+j]-sum) / data[i*maxsize+i];
+                }
+            }
+
+            for(int i=0; i<actualsize; i++) {
+                log_determinant += Math.log(Math.abs((data[i*n+i]))/Math.log(10.0f));
+                // System.out.println("log_determinant: " + log_determinant);
+            }
+
+            for ( int i = 0; i < actualsize; i++ )  // invert L
+                for ( int j = i; j < actualsize; j++ )  {
+                    float x = 1.0F;
+                    if ( i != j ) {
+                        x = 0.0F;
+                        for ( int k = i; k < j; k++ )
+                            x -= data[j*maxsize+k]*data[k*maxsize+i];
+                    }
+                    data[j*maxsize+i] = x / data[j*maxsize+j];
+                }
+            for ( int i = 0; i < actualsize; i++ )   // invert U
+                for ( int j = i; j < actualsize; j++ )  {
+                    if ( i == j ) continue;
+                    float sum = 0.0F;
+                    for ( int k = i; k < j; k++ )
+                        sum += data[k*maxsize+j]*( (i==k) ? 1.0 : data[i*maxsize+k] );
+                    data[i*maxsize+j] = -sum;
+                }
+            for ( int i = 0; i < actualsize; i++ )   // final inversion
+                for ( int j = 0; j < actualsize; j++ )  {
+                    float sum = 0.0F;
+                    for ( int k = ((i>j)?i:j); k < actualsize; k++ )
+                        sum += ((j==k)?1.0:data[j*maxsize+k])*data[k*maxsize+i];
+                    data[j*maxsize+i] = sum;
+                }
+
+        } else {
+            if(PRINT == 1)System.out.println("Error: Invalid dimensionality for invert(...)\n");
+        }
+        return log_determinant;
+    }
+
+    /*
+     * Another matrix inversion function
+     * This was modified from the 'cluster' application by Charles A. Bouman
+     */
     public static void main(String[]args)throws FileNotFoundException{
             // Getting the context info from a file in json
         String CONFIG_PATH="config/config.json";
@@ -695,8 +838,8 @@ public class GMM {
         String fileName;
 
         // Command input simulation
-        original_num_clusters=16;
-        desired_num_clusters=8;
+        original_num_clusters = 16;
+        desired_num_clusters = 8;
         fileName="../data/mydata.txt";
 
         float[]fcs_data_by_event=gmm.readData(fileName);
