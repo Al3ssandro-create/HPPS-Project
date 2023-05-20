@@ -18,7 +18,7 @@
 #define COVARIANCE_DYNAMIC_RANGE 1E6
 
 // if 0, uses random, else picks events uniformly distributed in data set
-#define UNIFORM_SEED 0
+#define UNIFORM_SEED 1
 
 // if 1, removes data points such that the total is a multiple of 16*num_gpus
 // Ensures memory alignment and therefore maximum performance
