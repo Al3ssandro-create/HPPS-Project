@@ -870,8 +870,6 @@ public class GMM {
 
         cluster_t clusters = gmm.cluster(original_num_clusters, desired_num_clusters, fcs_data_by_event);
 
-        // TODO: print the results
-
         PrintStream ps_console = System.out;
 
         String result_suffix = ".results";
