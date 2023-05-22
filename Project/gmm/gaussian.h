@@ -49,7 +49,7 @@
 
 // Used to enable regular print outs (such as the Rissanen scores, clustering results)
 // This should be enabled for general use and disabled for performance evaluations only
-#define ENABLE_PRINT 1
+#define ENABLE_PRINT 0
 
 // Used to enable print time profiling
 // This should be enabled for performance evaluations only
