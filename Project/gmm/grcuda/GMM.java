@@ -12,7 +12,7 @@ import java.util.Scanner;
 public class GMM {
     private Context context;
 
-    public int PRINT = 0;
+    public int PRINT = 1;
     public int OUTPUT = 0;
     private int TRUNCATE = 1;
     private int DEBUG = 0;
@@ -816,14 +816,14 @@ public class GMM {
         System.out.println("Probability: " + clusters.pi[i]);
         System.out.println("N: " + clusters.N[i]);
         System.out.println("Means: ");
-        for(int j=0; i<num_dimensions; j++){
+        for(int j = 0; j < num_dimensions; j++){
             System.out.printf(clusters.means[i*num_dimensions+j] + " ");
         }
         System.out.printf("\n");
 
         System.out.printf("R Matrix:");
-        for(int j=0; i<num_dimensions; j++) {
-            for(int c=0; j<num_dimensions; c++) {
+        for(int j = 0; j < num_dimensions; j++) {
+            for(int c = 0; c < num_dimensions; c++) {
                 System.out.printf(clusters.R[i*num_dimensions*num_dimensions+j*num_dimensions+c] + " ");
             }
             System.out.printf("\n");
@@ -843,7 +843,7 @@ public class GMM {
      * Another matrix inversion function
      * This was modified from the 'cluster' application by Charles A. Bouman
      */
-    public static void main(String[]args) throws FileNotFoundException {
+    public static void main(String[]args) throws IOException {
         // Getting the context info from a file in json
         String CONFIG_PATH="config/config.json";
         Gson gson=new GsonBuilder().setPrettyPrinting().create();
@@ -861,10 +861,10 @@ public class GMM {
         String fileNameOutput;
 
         // Command input simulation
-        original_num_clusters = 32;
-        desired_num_clusters = 8;
-        fileNameInput = "../data/test0.txt";
-        fileNameOutput = "../output/test0.txt";
+        original_num_clusters = Integer.parseInt(args[0]);
+        desired_num_clusters = Integer.parseInt(args[3]);
+        fileNameInput = args[1];
+        fileNameOutput = args[2];
 
         float[] fcs_data_by_event = gmm.readData(fileNameInput);
 
@@ -874,8 +874,6 @@ public class GMM {
 
         String result_suffix = ".results";
         String summary_suffix = ".summary";
-        int filenamesize1 = fileNameInput.length() + result_suffix.length() + 1;
-        int filenamesize2 = fileNameOutput.length() + summary_suffix.length() + 1;
         String result_filename = fileNameOutput + result_suffix;
         String summary_filename = fileNameOutput + summary_suffix;
 
