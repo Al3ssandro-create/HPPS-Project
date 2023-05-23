@@ -384,7 +384,7 @@ estep1(float* data, clusters_t* clusters, int num_dimensions, int num_events) {
 }
 
 __global__ void
-estep2(float* fcs_data, clusters_t* clusters, int num_dimensions, int num_clusters, int num_events, float* likelihood) {
+estep2(clusters_t* clusters, int num_dimensions, int num_clusters, int num_events, float* likelihood) {
     float temp;
     float thread_likelihood = 0.0f;
     __shared__ float total_likelihoods[NUM_THREADS_ESTEP];

@@ -1,0 +1,4 @@
+File Extension: txt
+Number of events removed to ensure memory alignment 0
+Warning: Only 1 CUDA GPU detected. Running single GPU version would be more efficient.
+##### Time execution overall : 12199703393000 micro sec. #####

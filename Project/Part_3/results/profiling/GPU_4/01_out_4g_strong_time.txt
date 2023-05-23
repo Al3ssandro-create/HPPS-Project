@@ -1,0 +1,3 @@
+File Extension: txt
+Number of events removed to ensure memory alignment 0
+##### Time execution overall : 38272289978000 micro sec. #####

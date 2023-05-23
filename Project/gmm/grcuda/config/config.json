@@ -1,0 +1,12 @@
+{
+    "exec_policies" : "async",
+    "dependency_policies": "with-const",
+    "new_stream_policies": "always-new",
+    "parent_stream_policies": "multigpu-disjoint",
+    "choose_device_policies": "round-robin",
+    "memory_advise": "none",
+    "prefetch": false,
+    "stream_attach": false,
+    "time_computation": false,
+    "num_gpus": 1
+}
