@@ -1,3 +1,4 @@
+package it.necst.grcuda.benchmark;
 public class GMMKernels {
     static String constants_kernel = "\n" +
             "#define PI  3.1415926535897931\n" +

@@ -1,3 +1,4 @@
+package it.necst.grcuda.benchmark;
 import org.graalvm.polyglot.Context;
 import org.graalvm.polyglot.Value;
 import com.google.gson.Gson;
@@ -12,11 +13,11 @@ import java.util.Scanner;
 public class GMM {
     private Context context;
 
-    public int PRINT = 1;
+    public int PRINT = 0;
     public int OUTPUT = 0;
     private int TRUNCATE = 1;
     private int DEBUG = 0;
-    private int PROFILING = 0;
+    private int PROFILING = 1;
     private int UNIFORM_SEED = 1;
     private int NUM_BLOCKS = 24;
     private int NUM_CLUSTERS_PER_BLOCK = 6;
@@ -176,7 +177,17 @@ public class GMM {
         // Setup the cluster data structures on host
         // This the shared memory space between the GPUs
         cluster_um[] um_clusters = new cluster_um[this.num_gpus];
-        for (int i = 0; i < this.num_gpus; i ++) um_clusters[i] = new cluster_um();
+        for (int i = 0; i < this.num_gpus; i++) {
+            um_clusters[i] = new cluster_um();
+            um_clusters[i].N = this.context.eval("grcuda", "float[" + original_num_clusters + "]");
+            um_clusters[i].pi = this.context.eval("grcuda", "float[" + original_num_clusters + "]");
+            um_clusters[i].constant = this.context.eval("grcuda", "float[" + original_num_clusters + "]");
+            um_clusters[i].avgvar = this.context.eval("grcuda", "float[" + original_num_clusters + "]");
+            um_clusters[i].means = this.context.eval("grcuda", "float[" + this.num_dimensions * original_num_clusters + "]");
+            um_clusters[i].R = this.context.eval("grcuda", "float[" + this.num_dimensions * this.num_dimensions * original_num_clusters + "]");
+            um_clusters[i].Rinv = this.context.eval("grcuda", "float[" + this.num_dimensions * this.num_dimensions * original_num_clusters + "]");
+            um_clusters[i].memberships = this.context.eval("grcuda", "float[" + original_num_clusters*num_events*2 + "]");
+        }
 
         // Only need one copy of all the memberships
         float[] special_memberships = new float[this.num_events * original_num_clusters];
@@ -222,20 +233,6 @@ public class GMM {
             if (i == this.num_gpus - 1)
                 my_num_events[i] += this.num_events % this.num_gpus; // last gpu has to handle the remaining uneven events
             if (DEBUG == 1) System.out.println("GPU " + i + " will handle " + my_num_events + " events");
-        }
-
-        // Setup the cluster data structures on device
-        // First allocate structures on the host, CUDA malloc the arrays
-        // Then CUDA malloc structures on the device and copy them over
-        for (int i = 0; i < this.num_gpus; i++) {
-            um_clusters[i].N = this.context.eval("grcuda", "float[" + original_num_clusters + "]");
-            um_clusters[i].pi = this.context.eval("grcuda", "float[" + original_num_clusters + "]");
-            um_clusters[i].constant = this.context.eval("grcuda", "float[" + original_num_clusters + "]");
-            um_clusters[i].avgvar = this.context.eval("grcuda", "float[" + original_num_clusters + "]");
-            um_clusters[i].means = this.context.eval("grcuda", "float[" + this.num_dimensions * original_num_clusters + "]");
-            um_clusters[i].R = this.context.eval("grcuda", "float[" + this.num_dimensions * this.num_dimensions * original_num_clusters + "]");
-            um_clusters[i].Rinv = this.context.eval("grcuda", "float[" + this.num_dimensions * this.num_dimensions * original_num_clusters + "]");
-            um_clusters[i].memberships = this.context.eval("grcuda", "float[" + my_num_events[i] * (original_num_clusters + this.NUM_CLUSTERS_PER_BLOCK - original_num_clusters % this.NUM_CLUSTERS_PER_BLOCK) + "]");
         }
 
         // Allocate a struct on the device
@@ -845,7 +842,7 @@ public class GMM {
      */
     public static void main(String[]args) throws IOException {
         // Getting the context info from a file in json
-        String CONFIG_PATH="config/config.json";
+        String CONFIG_PATH = "/home/ubuntu/HPPS-Project/Project/gmm/grcuda/src/main/java/it/necst/grcuda/benchmark/config/config.json";
         Gson gson=new GsonBuilder().setPrettyPrinting().create();
         JsonReader reader=new JsonReader(new FileReader(CONFIG_PATH));
         Config parsedConfig=gson.fromJson(reader,Config.class);
@@ -861,10 +858,14 @@ public class GMM {
         String fileNameOutput;
 
         // Command input simulation
-        original_num_clusters = Integer.parseInt(args[0]);
-        desired_num_clusters = Integer.parseInt(args[3]);
-        fileNameInput = args[1];
-        fileNameOutput = args[2];
+        //original_num_clusters = Integer.parseInt(args[0]);
+        //desired_num_clusters = Integer.parseInt(args[3]);
+        //fileNameInput = args[1];
+        //fileNameOutput = args[2];
+        original_num_clusters = 32;
+        desired_num_clusters = 8;
+        fileNameInput = "/home/ubuntu/HPPS-Project/Project/gmm/data/mydata_4g.txt";
+        fileNameOutput = "/home/ubuntu/HPPS-Project/Project/Part_3/results/01_out_1g_strong.txt";
 
         float[] fcs_data_by_event = gmm.readData(fileNameInput);
 

@@ -1,4 +1,32 @@
-File Extension: txt
-Number of events removed to ensure memory alignment 0
-Warning: Only 1 CUDA GPU detected. Running single GPU version would be more efficient.
-##### Time execution overall : 46023298856000 micro sec. #####
+GMM.java:867: error: unclosed character literal
+        fileNameInput = '../data/mydata_4g.txt';
+                        ^
+GMM.java:867: error: unclosed character literal
+        fileNameInput = '../data/mydata_4g.txt';
+                                              ^
+GMM.java:867: error: not a statement
+        fileNameInput = '../data/mydata_4g.txt';
+                                ^
+GMM.java:868: error: unclosed character literal
+        fileNameOutput = '../../Part_3/results/01_out_1g_strong.txt';
+                         ^
+GMM.java:868: error: illegal '.'
+        fileNameOutput = '../../Part_3/results/01_out_1g_strong.txt';
+                              ^
+GMM.java:868: error: illegal underscore
+        fileNameOutput = '../../Part_3/results/01_out_1g_strong.txt';
+                                                 ^
+GMM.java:868: error: not a statement
+        fileNameOutput = '../../Part_3/results/01_out_1g_strong.txt';
+                                              ^
+GMM.java:868: error: ';' expected
+        fileNameOutput = '../../Part_3/results/01_out_1g_strong.txt';
+                                                  ^
+GMM.java:868: error: unclosed character literal
+        fileNameOutput = '../../Part_3/results/01_out_1g_strong.txt';
+                                                                   ^
+GMM.java:868: error: not a statement
+        fileNameOutput = '../../Part_3/results/01_out_1g_strong.txt';
+                                                               ^
+10 errors
+error: compilation failed

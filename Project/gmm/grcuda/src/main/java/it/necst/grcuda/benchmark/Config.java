@@ -1,3 +1,4 @@
+package it.necst.grcuda.benchmark;
 public class Config {
     public String exec_policies;
     public String dependency_policies;
