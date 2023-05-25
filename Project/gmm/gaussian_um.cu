@@ -190,9 +190,20 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
     // This the shared memory space between the GPUs
     clusters_t* um_clusters;
     CUDA_SAFE_CALL(cudaMallocManaged(&um_clusters, sizeof(clusters_t)*num_gpus));
+    for (int g = 0; g< num_gpus; g++){
+        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].N), sizeof(float)*original_num_clusters));
+        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].pi), sizeof(float)*original_num_clusters));
+        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].constant), sizeof(float)*original_num_clusters));
+        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].avgvar), sizeof(float)*original_num_clusters));
+        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].means), sizeof(float)*num_dimensions*original_num_clusters));
+        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].R), sizeof(float)*num_dimensions*num_dimensions*original_num_clusters));
+        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].Rinv), sizeof(float)*num_dimensions*num_dimensions*original_num_clusters));
+        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].memberships), sizeof(float)*original_num_clusters*num_events*2));
+       
+    }
 
     // Only need one copy of all the memberships
-    float* special_memberships = (float*) malloc(sizeof(float)*num_events*original_num_clusters);
+    //float* special_memberships = (float*) malloc(sizeof(float)*num_events*original_num_clusters);
     
     // Declare another set of clusters for saving the results of the best configuration
     clusters_t* saved_clusters = (clusters_t*) malloc(sizeof(clusters_t));
@@ -266,15 +277,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         // Then CUDA malloc structures on the device and copy them over
         startTimer(timers.memcpy);
 
-        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[tid].N), sizeof(float)*original_num_clusters));
-        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[tid].pi), sizeof(float)*original_num_clusters));
-        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[tid].constant), sizeof(float)*original_num_clusters));
-        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[tid].avgvar), sizeof(float)*original_num_clusters));
-        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[tid].means), sizeof(float)*num_dimensions*original_num_clusters));
-        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[tid].R), sizeof(float)*num_dimensions*num_dimensions*original_num_clusters));
-        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[tid].Rinv), sizeof(float)*num_dimensions*num_dimensions*original_num_clusters));
-        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[tid].memberships), sizeof(float)*my_num_events*(original_num_clusters+NUM_CLUSTERS_PER_BLOCK-original_num_clusters % NUM_CLUSTERS_PER_BLOCK)));
-       
         // Allocate a struct on the device 
         DEBUG("Finished allocating memory on device for clusters.\n");      
 
@@ -613,7 +615,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             stopTimer(timers.memcpy);
             startTimer(timers.cpu);
             for(int c=0; c < num_clusters; c++) {
-                memcpy(&(special_memberships[c*num_events+tid*events_per_gpu]), &(um_clusters[tid].memberships[c*my_num_events]),sizeof(float)*my_num_events);
+                memcpy(&(um_clusters[0].memberships[c*num_events+tid*events_per_gpu]), &(um_clusters[tid].memberships[c*my_num_events]),sizeof(float)*my_num_events);
             }
             #pragma omp barrier
             DEBUG("GPU %d done with copying cluster data from device\n",tid); 
@@ -642,7 +644,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                     memcpy(saved_clusters->means,um_clusters[0].means,sizeof(float)*num_dimensions*num_clusters);
                     memcpy(saved_clusters->R,um_clusters[0].R,sizeof(float)*num_dimensions*num_dimensions*num_clusters);
                     memcpy(saved_clusters->Rinv,um_clusters[0].Rinv,sizeof(float)*num_dimensions*num_dimensions*num_clusters);
-                    memcpy(saved_clusters->memberships,special_memberships,sizeof(float)*num_events*num_clusters);
+                    memcpy(saved_clusters->memberships,um_clusters[0].memberships,sizeof(float)*num_events*num_clusters);
                 }
             }
             #pragma omp barrier
@@ -714,7 +716,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 
                 startTimer(timers.cpu);
                 for(int c=0; c < num_clusters; c++) {
-                    memcpy(&um_clusters[tid].memberships[c*my_num_events], &(special_memberships[c*num_events+tid*(num_events/num_gpus)]),sizeof(float)*my_num_events);
+                    memcpy(&um_clusters[tid].memberships[c*my_num_events], &(um_clusters[0].memberships[c*num_events+tid*(num_events/num_gpus)]),sizeof(float)*my_num_events);
                 }
                 stopTimer(timers.cpu);
             } // GMM reduction block 
@@ -748,7 +750,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         free(scratch_cluster.memberships);
              
         // cleanup GPU memory
-     
         CUDA_SAFE_CALL(cudaFree(um_fcs_data_by_event));
         CUDA_SAFE_CALL(cudaFree(um_fcs_data_by_dimension));
 
@@ -766,7 +767,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
     CUDA_SAFE_CALL(cudaFree(um_clusters));
 	// main thread cleanup
 	free(fcs_data_by_dimension);
-    free(special_memberships);
 
 	*final_num_clusters = ideal_num_clusters;
 	return saved_clusters;

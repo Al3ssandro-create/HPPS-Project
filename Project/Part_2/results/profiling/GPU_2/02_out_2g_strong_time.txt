@@ -2,19 +2,19 @@ File Extension: txt
 Number of events removed to ensure memory alignment 0
 CPU thread 0 (of 2) using device 0: Tesla V100-SXM2-16GB
 CPU thread 1 (of 2) using device 1: Tesla V100-SXM2-16GB
-##### Time execution on device 0: 4291187 micro sec. #####
+##### Time execution on device 0: 3847397 micro sec. #####
 GPU 0:
-	E-step Kernel:	 1.0992	1920	 0.0006
-	M-step Kernel:	 1.7383	1895	 0.0009
-	Consts Kernel:	 0.1393	1896	 0.0001
-	Order Reduce:	 0.1424	25	 0.0057
-	GPU Memcpy:	 0.0216
-	CPU:		 0.6920
-##### Time execution on device 1: 4291188 micro sec. #####
+	E-step Kernel:	 1.0024	1920	 0.0005
+	M-step Kernel:	 1.6823	1895	 0.0009
+	Consts Kernel:	 0.1198	1896	 0.0001
+	Order Reduce:	 0.0656	25	 0.0026
+	GPU Memcpy:	 0.0178
+	CPU:		 0.5526
+##### Time execution on device 1: 3847398 micro sec. #####
 GPU 1:
-	E-step Kernel:	 0.9111	1920	 0.0005
-	M-step Kernel:	 2.0003	1895	 0.0011
-	Consts Kernel:	 0.2700	1896	 0.0001
-	Order Reduce:	 0.1433	25	 0.0057
-	GPU Memcpy:	 0.0189
-	CPU:		 0.6684
+	E-step Kernel:	 1.0267	1920	 0.0005
+	M-step Kernel:	 1.7442	1895	 0.0009
+	Consts Kernel:	 0.1284	1896	 0.0001
+	Order Reduce:	 0.1282	25	 0.0051
+	GPU Memcpy:	 0.0177
+	CPU:		 0.5912
