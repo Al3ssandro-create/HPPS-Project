@@ -623,7 +623,7 @@ public class GMM {
         this.end_exec = System.nanoTime();
 
         if (PRINT == 1) System.out.println("Final rissanen Score was: " + min_rissanen + ", with " + this.ideal_num_clusters + " clusters. (Right one: -MultiGPU: 986243,625; -SigleGPU: 986241.125)");
-        if (PROFILING == 1) System.out.println("##### Time execution overall : " + (this.end_exec - this.start_exec) * 1000 +" micro sec. #####");
+        if (PROFILING == 1) System.out.println("##### Time execution overall : " + (this.end_exec - this.start_exec) / 1000 +" micro sec. #####");
         // ------ OPENMP END ------
 
         this.final_num_clusters = this.ideal_num_clusters;
