@@ -631,7 +631,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 memcpy(um_clusters[tid].Rinv, um_clusters[0].Rinv, sizeof(float)*num_dimensions*num_dimensions*num_clusters);
 
                 for(int c=0; c < num_clusters; c++) {
-                    memcpy(&um_clusters[tid].memberships[c*my_num_events], &(special_memberships[c*num_events+tid*(num_events/num_gpus)]),sizeof(float)*my_num_events);
+                    memcpy(&um_clusters[tid].memberships[c*my_num_events], &(um_clusters[0].memberships[c*num_events+tid*(num_events/num_gpus)]),sizeof(float)*my_num_events);
                 }
 
             } // GMM reduction block 
