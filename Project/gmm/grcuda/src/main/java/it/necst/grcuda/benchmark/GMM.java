@@ -13,7 +13,7 @@ import java.util.Scanner;
 public class GMM {
     private Context context;
 
-    public int PRINT = 0;
+    public int PRINT = 1;
     public int OUTPUT = 0;
     private int TRUNCATE = 1;
     private int DEBUG = 0;
@@ -50,19 +50,19 @@ public class GMM {
         // Building the kernel in order to be able to call them later
         Value buildKernel = this.context.eval("grcuda", "buildkernel");
         seed_clusters = buildKernel.execute(GMMKernels.seed_clusters, "seed_clusters",
-                "pointer, pointer, pointer, pointer, pointer, pointer, sint32, sint32, sint32");
+                "const pointer, pointer, pointer, pointer, pointer, pointer, sint32, sint32, sint32");
         constants_kernel = buildKernel.execute(GMMKernels.constants_kernel, "constants_kernel",
-                "pointer, pointer, pointer, pointer, pointer, sint32, sint32");
+                "const pointer, pointer, pointer, const pointer, pointer, sint32, sint32");
         estep1 = buildKernel.execute(GMMKernels.estep1, "estep1",
-                "pointer, pointer, pointer, pointer, pointer, pointer, sint32, sint32");
+                "const pointer, const pointer, const pointer, const pointer, const pointer, pointer, sint32, sint32");
         estep2 = buildKernel.execute(GMMKernels.estep2, "estep2",
                 "pointer, sint32, sint32, sint32, pointer");
         mstep_N = buildKernel.execute(GMMKernels.mstep_N, "mstep_N",
-                "pointer, pointer, pointer, sint32, sint32, sint32");
+                "const pointer, pointer, pointer, sint32, sint32, sint32");
         mstep_means = buildKernel.execute(GMMKernels.mstep_means, "mstep_means",
-                "pointer, pointer, pointer, sint32, sint32, sint32");
+                "const pointer, const pointer, pointer, sint32, sint32, sint32");
         mstep_covariance2 = buildKernel.execute(GMMKernels.mstep_covariance2, "mstep_covariance2",
-                "pointer, pointer, pointer, pointer, pointer, sint32, sint32, sint32");
+                "const pointer, pointer, const pointer, const pointer, const pointer, sint32, sint32, sint32");
     }
 
     public float[] readData(String fileName) {
@@ -137,10 +137,6 @@ public class GMM {
     }
 
     public cluster_t cluster(int original_num_clusters, int desired_num_clusters, float[] fcs_data_by_event) {
-        int regroup_iterations = 0;
-        int params_iterations = 0;
-        int constants_iterations = 0;
-        int reduce_iterations = 0;
         int stop_number;
 
         // Number of clusters to stop iterating at.
@@ -277,8 +273,6 @@ public class GMM {
         constants_kernel.execute(original_num_clusters, NUM_THREADS_MSTEP)
                 .execute(um_clusters[0].R, um_clusters[0].Rinv, um_clusters[0].constant, um_clusters[0].N, um_clusters[0].pi, original_num_clusters, this.num_dimensions);
 
-        constants_iterations++;
-
         seed_clusters(um_clusters[0],fcs_data_by_dimension,original_num_clusters, this.num_dimensions, this.num_events);
 
         if (DEBUG == 1) System.out.println("Starting Clusters");
@@ -325,7 +319,7 @@ public class GMM {
         int iters;
 
         //epsilon = 1e-6;
-        if (PRINT == 1) System.out.println("Gaussian.cu: epsilon = " + epsilon);
+        if (PRINT == 1) System.out.printf("Gaussian.cu: epsilon = %.6f\n", epsilon);
 
         // Variables for GMM reduce order
         float distance, min_distance = 0.0F;
@@ -351,7 +345,6 @@ public class GMM {
                 estep2.execute(this.NUM_BLOCKS, this.NUM_THREADS_ESTEP)
                         .execute(um_clusters[i].memberships, this.num_dimensions, num_clusters, my_num_events[i], shared_likelihoods[i]);
             }
-            regroup_iterations++;
 
             likelihood = 0.0F;
             for (int i = 0; i < this.num_gpus; i++)
@@ -470,8 +463,6 @@ public class GMM {
                     memcpy(um_clusters[i].R, um_clusters[0].R, 0, 0, num_clusters * this.num_dimensions * this.num_dimensions);
                 }
 
-                params_iterations++;
-
                 if (DEBUG == 1) System.out.println("Invoking constants kernel.");
                 // Inverts the R matrices, computes the constant, normalizes cluster probabilities
                 for (int i = 0; i < this.num_gpus; i++) {
@@ -481,8 +472,6 @@ public class GMM {
 
                 for (int temp_c = 0; temp_c < num_clusters; temp_c++)
                     if (DEBUG == 1) System.out.println("Cluster " + temp_c +" constant: " + um_clusters[0].constant.getArrayElement(temp_c).asFloat());
-
-                constants_iterations++;
 
                 if (DEBUG == 1) System.out.println("Invoking regroup (E-step) kernel with " + this.NUM_BLOCKS + " blocks.");
 
@@ -496,8 +485,6 @@ public class GMM {
                     estep2.execute(this.NUM_BLOCKS, this.NUM_THREADS_ESTEP)
                             .execute(um_clusters[i].memberships, this.num_dimensions, num_clusters, my_num_events[i], shared_likelihoods[i]);
                 }
-
-                regroup_iterations++;
 
                 // ------ OPENMP MASTER START (NUM_GPU == 0) ------
                 likelihood = 0.0F;
@@ -525,8 +512,8 @@ public class GMM {
 
             // Calculate Rissanen Score
             rissanen = -likelihood + 0.5F * (num_clusters * (1.0F + this.num_dimensions + 0.5F * (this.num_dimensions + 1.0F) * this.num_dimensions) - 1.0F) * (float) Math.log((double) this.num_events * this.num_dimensions);
-            if (PRINT == 1) System.out.println("Likelihood: " + likelihood);
-            if (PRINT == 1) System.out.println("Rissanen Score: " + rissanen + "\n");
+            if (PRINT == 1) System.out.printf("Likelihood: %e\n", likelihood);
+            if (PRINT == 1) System.out.printf("\nRissanen Score: %e\n\n", rissanen);
 
             // ------ OPENMP MASTER START (NUM_GPU == 0) ------
             // Save the cluster data the first time through, so we have a base rissanen score and result
@@ -613,13 +600,11 @@ public class GMM {
                     }
                 }
             } // GMM reduction block
-
-            reduce_iterations++;
         } // outer loop from M to 1 clusters
 
         this.end_exec = System.nanoTime();
 
-        if (PRINT == 1) System.out.println("Final rissanen Score was: " + min_rissanen + ", with " + this.ideal_num_clusters + " clusters. (Right one: -MultiGPU: 986243,625; -SigleGPU: 986241.125)");
+        if (PRINT == 1) System.out.printf("Final rissanen Score was: %.6f, with %d clusters.\n", min_rissanen, this.ideal_num_clusters);
         if (PROFILING == 1) System.out.println("##### Time execution overall : " + (this.end_exec - this.start_exec) / 1000 +" micro sec. #####");
         // ------ OPENMP END ------
 
@@ -810,18 +795,18 @@ public class GMM {
     }
 
     public void writeCluster(cluster_t clusters, int i, int num_dimensions) {
-        System.out.println("Probability: " + clusters.pi[i]);
-        System.out.println("N: " + clusters.N[i]);
-        System.out.println("Means: ");
+        System.out.printf("Probability: %.6f\n", clusters.pi[i]);
+        System.out.printf("N: %.6f\n", clusters.N[i]);
+        System.out.printf("Means: ");
         for(int j = 0; j < num_dimensions; j++){
-            System.out.printf(clusters.means[i*num_dimensions+j] + " ");
+            System.out.printf("%.6f ", clusters.means[i*num_dimensions+j]);
         }
         System.out.printf("\n");
 
-        System.out.printf("R Matrix:");
+        System.out.printf("\nR Matrix:\n");
         for(int j = 0; j < num_dimensions; j++) {
             for(int c = 0; c < num_dimensions; c++) {
-                System.out.printf(clusters.R[i*num_dimensions*num_dimensions+j*num_dimensions+c] + " ");
+                System.out.printf("%.6f ", clusters.R[i*num_dimensions*num_dimensions+j*num_dimensions+c]);
             }
             System.out.printf("\n");
         }
@@ -862,9 +847,9 @@ public class GMM {
         //desired_num_clusters = Integer.parseInt(args[3]);
         //fileNameInput = args[1];
         //fileNameOutput = args[2];
-        original_num_clusters = 32;
+        original_num_clusters = 16;
         desired_num_clusters = 8;
-        fileNameInput = "/home/ubuntu/HPPS-Project/Project/gmm/data/mydata_4g.txt";
+        fileNameInput = "/home/ubuntu/HPPS-Project/Project/gmm/data/mydata.txt";
         fileNameOutput = "/home/ubuntu/HPPS-Project/Project/Part_3/results/01_out_1g_strong.txt";
 
         float[] fcs_data_by_event = gmm.readData(fileNameInput);
@@ -897,6 +882,7 @@ public class GMM {
                 System.setOut(ps_console);
                 System.out.println("Cluster #" + c);
                 gmm.writeCluster(clusters, c, gmm.num_dimensions);
+                System.out.println("\n");
             }
 
             if(gmm.OUTPUT == 1) {
@@ -904,6 +890,7 @@ public class GMM {
                 System.setOut(ps_file);
                 System.out.println("Cluster #" + c);
                 gmm.writeCluster(clusters, c, gmm.num_dimensions);
+                System.out.println("\n");
             }
         }
 
@@ -932,7 +919,6 @@ public class GMM {
                     System.out.println(clusters.memberships[c * gmm.num_events + i] + ",");
                 }
                 System.out.println(clusters.memberships[(gmm.ideal_num_clusters - 1) * gmm.num_events + i]);
-
             }
         }
     }
