@@ -270,32 +270,34 @@ public class GMM {
 
         seed_clusters(um_clusters[0],fcs_data_by_dimension,original_num_clusters, this.num_dimensions, this.num_events);
 
-        // if (DEBUG == 1) System.out.println("Starting Clusters");
-        // for (int c = 0; c < original_num_clusters; c++) {
-        //     if (DEBUG == 1) System.out.println("Cluster #" + c);
+        /* if (DEBUG == 1) System.out.println("Starting Clusters");
+        if (DEBUG == 1) {
+            for (int c = 0; c < original_num_clusters; c++) {
+                System.out.println("Cluster #" + c);
 
-        //     if (DEBUG == 1) System.out.println("\tN: " + um_clusters[0].N.getArrayElement(c).asFloat());
+                System.out.println("\tN: " + um_clusters[0].N.getArrayElement(c).asFloat());
 
-        //     if (DEBUG == 1) System.out.println("\tpi: " + um_clusters[0].pi.getArrayElement(c).asFloat());
+                System.out.println("\tpi: " + um_clusters[0].pi.getArrayElement(c).asFloat());
 
-        //     if (DEBUG == 1) System.out.println("\tMeans:");
-        //     for (int d = 0; d < this.num_dimensions; d++)
-        //         if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].means.getArrayElement(c * this.num_dimensions + d).asFloat());
+                System.out.println("\tMeans:");
+                for (int d = 0; d < this.num_dimensions; d++)
+                    System.out.println("\t\t" + um_clusters[0].means.getArrayElement(c * this.num_dimensions + d).asFloat());
 
-        //     if (DEBUG == 1) System.out.println("\tR:");
-        //     for (int d = 0; d < this.num_dimensions; d++)
-        //         for (int e = 0; e < this.num_dimensions; e++)
-        //             if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].R.getArrayElement(c * this.num_dimensions * this.num_dimensions + d * this.num_dimensions + e).asFloat());
+                System.out.println("\tR:");
+                for (int d = 0; d < this.num_dimensions; d++)
+                    for (int e = 0; e < this.num_dimensions; e++)
+                    System.out.println("\t\t" + um_clusters[0].R.getArrayElement(c * this.num_dimensions * this.num_dimensions + d * this.num_dimensions + e).asFloat());
 
-        //     if (DEBUG == 1) System.out.println("\tR-inverse:");
-        //     for (int d = 0; d < this.num_dimensions; d++)
-        //         for (int e = 0; e < this.num_dimensions; e++)
-        //             if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].Rinv.getArrayElement(c * this.num_dimensions * this.num_dimensions + d * this.num_dimensions + e).asFloat());
+                System.out.println("\tR-inverse:");
+                for (int d = 0; d < this.num_dimensions; d++)
+                    for (int e = 0; e < this.num_dimensions; e++)
+                        System.out.println("\t\t" + um_clusters[0].Rinv.getArrayElement(c * this.num_dimensions * this.num_dimensions + d * this.num_dimensions + e).asFloat());
 
-        //     if (DEBUG == 1) System.out.println("\tAvgvar: " + um_clusters[0].avgvar.getArrayElement(c).asFloat());
+                System.out.println("\tAvgvar: " + um_clusters[0].avgvar.getArrayElement(c).asFloat());
 
-        //     if (DEBUG == 1) System.out.println("\tConstant: " + um_clusters[0].constant.getArrayElement(c).asFloat());
-        // }
+            System.out.println("\tConstant: " + um_clusters[0].constant.getArrayElement(c).asFloat());
+            }
+        } */
         // ------ OPENMP MASTER END (NUM_GPU == 0) ------
 
         // Synchronize after first gpu does the seeding, copy result to all gpus
