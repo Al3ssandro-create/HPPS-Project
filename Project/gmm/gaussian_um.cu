@@ -303,36 +303,38 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 
             seed_clusters(&um_clusters[0], fcs_data_by_event, original_num_clusters, num_dimensions, num_events);
             DEBUG("Starting Clusters\n");
-            for(int c=0; c < original_num_clusters; c++) {
-                DEBUG("Cluster #%d\n",c);
-
-                DEBUG("\tN: %f\n",um_clusters[0].N[c]); 
-                DEBUG("\tpi: %f\n",um_clusters[0].pi[c]); 
-
-                // means
-                DEBUG("\tMeans: ");
-                for(int d=0; d < num_dimensions; d++) {
-                    DEBUG("%.2f ",um_clusters[0].means[c*num_dimensions+d]);
+            if (ENABLE_DEBUG) {
+                for(int c=0; c < original_num_clusters; c++) {
+                    DEBUG("Cluster #%d\n",c);
+    
+                    DEBUG("\tN: %f\n",um_clusters[0].N[c]); 
+                    DEBUG("\tpi: %f\n",um_clusters[0].pi[c]); 
+    
+                    // means
+                    DEBUG("\tMeans: ");
+                    for(int d=0; d < num_dimensions; d++) {
+                        DEBUG("%.2f ",um_clusters[0].means[c*num_dimensions+d]);
+                    }
+                    DEBUG("\n");
+    
+                    DEBUG("\tR:\n\t");
+                    for(int d=0; d < num_dimensions; d++) {
+                        for(int e=0; e < num_dimensions; e++)
+                            DEBUG("%.2f ",um_clusters[0].R[c*num_dimensions*num_dimensions+d*num_dimensions+e]);
+                        DEBUG("\n\t");
+                    }
+                    DEBUG("R-inverse:\n\t");
+                    for(int d=0; d < num_dimensions; d++) {
+                        for(int e=0; e < num_dimensions; e++)
+                            DEBUG("%.2f ",um_clusters[0].Rinv[c*num_dimensions*num_dimensions+d*num_dimensions+e]);
+                        DEBUG("\n\t");
+                    }
+                    DEBUG("\n");
+                    DEBUG("\tAvgvar: %e\n",um_clusters[0].avgvar[c]);
+                    DEBUG("\tConstant: %e\n",um_clusters[0].constant[c]);
                 }
-                DEBUG("\n");
-
-                DEBUG("\tR:\n\t");
-                for(int d=0; d < num_dimensions; d++) {
-                    for(int e=0; e < num_dimensions; e++)
-                        DEBUG("%.2f ",um_clusters[0].R[c*num_dimensions*num_dimensions+d*num_dimensions+e]);
-                    DEBUG("\n\t");
-                }
-                DEBUG("R-inverse:\n\t");
-                for(int d=0; d < num_dimensions; d++) {
-                    for(int e=0; e < num_dimensions; e++)
-                        DEBUG("%.2f ",um_clusters[0].Rinv[c*num_dimensions*num_dimensions+d*num_dimensions+e]);
-                    DEBUG("\n\t");
-                }
-                DEBUG("\n");
-                DEBUG("\tAvgvar: %e\n",um_clusters[0].avgvar[c]);
-                DEBUG("\tConstant: %e\n",um_clusters[0].constant[c]);
-
             }
+            
         }
 
         // synchronize after first gpu does the seeding, copy result to all gpus
@@ -675,7 +677,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 	*final_num_clusters = ideal_num_clusters;
 	return saved_clusters;
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////
 // Program main
