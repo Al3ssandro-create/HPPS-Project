@@ -194,7 +194,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
     }
 
     // Only need one copy of all the memberships
-    // float* special_memberships = (float*) malloc(sizeof(float)*num_events*original_num_clusters);
     
     // Declare another set of clusters for saving the results of the best configuration
     clusters_t* saved_clusters = (clusters_t*) malloc(sizeof(clusters_t));
@@ -256,7 +255,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         // Setup the cluster data structures on device
         // First allocate structures on the host, CUDA malloc the arrays
         // Then CUDA malloc structures on the device and copy them over
-        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[tid].memberships), sizeof(float)*my_num_events*(original_num_clusters+NUM_CLUSTERS_PER_BLOCK-original_num_clusters % NUM_CLUSTERS_PER_BLOCK)));
 
         // Allocate a struct on the device 
         DEBUG("Finished allocating memory on device for clusters.\n");      
@@ -673,7 +671,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 
 	// main thread cleanup
 	free(fcs_data_by_dimension);
-    //free(special_memberships);
 
 	*final_num_clusters = ideal_num_clusters;
 	return saved_clusters;
