@@ -190,11 +190,11 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].means), sizeof(float)*num_dimensions*original_num_clusters));
         CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].R), sizeof(float)*num_dimensions*num_dimensions*original_num_clusters));
         CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].Rinv), sizeof(float)*num_dimensions*num_dimensions*original_num_clusters));
-        // CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].memberships), sizeof(float)*original_num_clusters*num_events*2));  
+        CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].memberships), sizeof(float)*original_num_clusters*num_events*2));  
     }
 
     // Only need one copy of all the memberships
-    float* special_memberships = (float*) malloc(sizeof(float)*num_events*original_num_clusters);
+    // float* special_memberships = (float*) malloc(sizeof(float)*num_events*original_num_clusters);
     
     // Declare another set of clusters for saving the results of the best configuration
     clusters_t* saved_clusters = (clusters_t*) malloc(sizeof(clusters_t));
@@ -536,7 +536,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             DEBUG("GPU %d done with EM loop\n",tid);
             
             for(int c=0; c < num_clusters; c++) {
-                memcpy(&(special_memberships[c*num_events+tid*events_per_gpu]), &(um_clusters[tid].memberships[c*my_num_events]),sizeof(float)*my_num_events);
+                memcpy(&(um_clusters[0].memberships[c*num_events+tid*events_per_gpu]), &(um_clusters[tid].memberships[c*my_num_events]),sizeof(float)*my_num_events);
             }
             #pragma omp barrier
             DEBUG("GPU %d done with copying cluster data from device\n",tid); 
@@ -565,7 +565,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                     memcpy(saved_clusters->means,um_clusters[0].means,sizeof(float)*num_dimensions*num_clusters);
                     memcpy(saved_clusters->R,um_clusters[0].R,sizeof(float)*num_dimensions*num_dimensions*num_clusters);
                     memcpy(saved_clusters->Rinv,um_clusters[0].Rinv,sizeof(float)*num_dimensions*num_dimensions*num_clusters);
-                    memcpy(saved_clusters->memberships,special_memberships,sizeof(float)*num_events*num_clusters);
+                    memcpy(saved_clusters->memberships,um_clusters[0].memberships,sizeof(float)*num_events*num_clusters);
                 }
             }
             #pragma omp barrier
@@ -673,7 +673,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 
 	// main thread cleanup
 	free(fcs_data_by_dimension);
-    free(special_memberships);
+    //free(special_memberships);
 
 	*final_num_clusters = ideal_num_clusters;
 	return saved_clusters;
