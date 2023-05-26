@@ -13,7 +13,7 @@ import java.util.Scanner;
 public class GMM {
     private Context context;
 
-    public int PRINT = 1;
+    public int PRINT = 0;
     public int OUTPUT = 0;
     private int TRUNCATE = 1;
     private int DEBUG = 0;
@@ -838,14 +838,14 @@ public class GMM {
         String fileNameOutput;
 
         // Command input simulation
-        //original_num_clusters = Integer.parseInt(args[0]);
-        //desired_num_clusters = Integer.parseInt(args[3]);
-        //fileNameInput = args[1];
-        //fileNameOutput = args[2];
-        original_num_clusters = 32;
-        desired_num_clusters = 8;
-        fileNameInput = "/home/ubuntu/HPPS-Project/Project/gmm/data/mydata_4g.txt";
-        fileNameOutput = "/home/ubuntu/HPPS-Project/Project/Part_3/results/01_out_1g_strong.txt";
+        original_num_clusters = Integer.parseInt(args[0]);
+        desired_num_clusters = Integer.parseInt(args[3]);
+        fileNameInput = args[1];
+        fileNameOutput = args[2];
+        // original_num_clusters = 32;
+        // desired_num_clusters = 8;
+        // fileNameInput = "/home/ubuntu/HPPS-Project/Project/gmm/data/mydata_4g.txt";
+        // fileNameOutput = "/home/ubuntu/HPPS-Project/Project/Part_3/results/01_out_1g_strong.txt";
 
         float[] fcs_data_by_event = gmm.readData(fileNameInput);
 
