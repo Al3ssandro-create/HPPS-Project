@@ -146,29 +146,28 @@ public class GMM {
             stop_number = desired_num_clusters;
         }
 
-        if (this.num_gpus < 1) {
-            System.out.println("ERROR: No CUDA capable GPUs detected.");
-            return null;
-        } else if (this.num_gpus == 1) {
-            System.out.println("Warning: Only 1 CUDA GPU detected. Running single GPU version would be more efficient.");
-        } else {
-            if (PRINT == 1) System.out.println("Using " + this.num_gpus + " GPUs");
-        }
+        // if (this.num_gpus < 1) {
+        //     System.out.println("ERROR: No CUDA capable GPUs detected.");
+        //     return null;
+        // } else if (this.num_gpus == 1) {
+        //     System.out.println("Warning: Only 1 CUDA GPU detected. Running single GPU version would be more efficient.");
+        // } else {
+        //     if (PRINT == 1) System.out.println("Using " + this.num_gpus + " GPUs");
+        // }
 
         // Transpose the event data (allows coalesced access pattern in E-step kernel)
         // This has consecutive values being from the same dimension of the data
         // (num_dimensions by num_events matrix)
         float[] fcs_data_by_dimension = new float[this.num_events * this.num_dimensions];
-
         for (int e = 0; e < this.num_events; e++) {
             for (int d = 0; d < this.num_dimensions; d++) {
                 fcs_data_by_dimension[d * this.num_events + e] = fcs_data_by_event[e * this.num_dimensions + d];
             }
         }
 
-        if (PRINT == 1) System.out.println("Number of events: " + this.num_events);
-        if (PRINT == 1) System.out.println("Number of dimensions: " + this.num_dimensions + "\n");
-        if (PRINT == 1) System.out.println("Starting with " + original_num_clusters + " cluster(s), will stop at " + stop_number + " cluster(s).");
+        // if (PRINT == 1) System.out.println("Number of events: " + this.num_events);
+        // if (PRINT == 1) System.out.println("Number of dimensions: " + this.num_dimensions + "\n");
+        // if (PRINT == 1) System.out.println("Starting with " + original_num_clusters + " cluster(s), will stop at " + stop_number + " cluster(s).");
 
         // Setup the cluster data structures on host
         // This the shared memory space between the GPUs
@@ -185,9 +184,6 @@ public class GMM {
             um_clusters[i].memberships = this.context.eval("grcuda", "float[" + original_num_clusters*num_events*2 + "]");
         }
 
-        // Only need one copy of all the memberships
-        float[] special_memberships = new float[this.num_events * original_num_clusters];
-
         // Declare another set of clusters for saving the results of the best configuration
         cluster_t saved_clusters = new cluster_t();
         saved_clusters.N = new float[original_num_clusters];
@@ -199,7 +195,7 @@ public class GMM {
         saved_clusters.Rinv = new float[this.num_dimensions * this.num_dimensions * original_num_clusters];
         saved_clusters.memberships = new float[this.num_events * original_num_clusters];
 
-        if (DEBUG == 1) System.out.println("Finished allocating shared cluster structures on host");
+        // if (DEBUG == 1) System.out.println("Finished allocating shared cluster structures on host");
 
         // Used to hold the result from regroup kernel
         Value[] shared_likelihoods = new Value[this.num_gpus];
@@ -219,7 +215,7 @@ public class GMM {
         scratch_cluster.Rinv = new float[this.num_dimensions * this.num_dimensions];
         scratch_cluster.memberships = new float[this.num_events];
 
-        if (DEBUG == 1) System.out.println("Finished allocating memory on host for clusters.");
+        // if (DEBUG == 1) System.out.println("Finished allocating memory on host for clusters.");
 
         // determine how many events this gpu will handle
         int events_per_gpu = this.num_events / this.num_gpus;
@@ -228,11 +224,10 @@ public class GMM {
             my_num_events[i] = events_per_gpu;
             if (i == this.num_gpus - 1)
                 my_num_events[i] += this.num_events % this.num_gpus; // last gpu has to handle the remaining uneven events
-            if (DEBUG == 1) System.out.println("GPU " + i + " will handle " + my_num_events + " events");
+            // if (DEBUG == 1) System.out.println("GPU " + i + " will handle " + my_num_events + " events");
         }
 
-        // Allocate a struct on the device
-        if (DEBUG == 1) System.out.println("Finished allocating memory on device for clusters.");
+        //if (DEBUG == 1) System.out.println("Finished allocating memory on device for clusters.");
 
         // Allocate device memory for FCS data and copy relavant FCS data to device.
         int[] mem_size = new int[this.num_gpus];
@@ -254,11 +249,11 @@ public class GMM {
             for (int d = 0; d < this.num_dimensions; d++) {
                 memcpy(um_fcs_data_by_dimension[i], fcs_data_by_dimension, d * my_num_events[i], d * this.num_events + i * events_per_gpu, my_num_events[i]);
             }
-            if (DEBUG == 1) System.out.println("GPU " + i + ": Finished copying FCS data to device.");
+            // if (DEBUG == 1) System.out.println("GPU " + i + ": Finished copying FCS data to device.");
         }
 
         //////////////// Initialization done, starting kernels ////////////////
-        if (DEBUG == 1) System.out.println("Invoking seed_clusters kernel.");
+        // if (DEBUG == 1) System.out.println("Invoking seed_clusters kernel.");
 
         // seed_clusters sets initial pi values,
         // finds the means / covariances and copies it to all the clusters
@@ -275,32 +270,32 @@ public class GMM {
 
         seed_clusters(um_clusters[0],fcs_data_by_dimension,original_num_clusters, this.num_dimensions, this.num_events);
 
-        if (DEBUG == 1) System.out.println("Starting Clusters");
-        for (int c = 0; c < original_num_clusters; c++) {
-            if (DEBUG == 1) System.out.println("Cluster #" + c);
+        // if (DEBUG == 1) System.out.println("Starting Clusters");
+        // for (int c = 0; c < original_num_clusters; c++) {
+        //     if (DEBUG == 1) System.out.println("Cluster #" + c);
 
-            if (DEBUG == 1) System.out.println("\tN: " + um_clusters[0].N.getArrayElement(c).asFloat());
+        //     if (DEBUG == 1) System.out.println("\tN: " + um_clusters[0].N.getArrayElement(c).asFloat());
 
-            if (DEBUG == 1) System.out.println("\tpi: " + um_clusters[0].pi.getArrayElement(c).asFloat());
+        //     if (DEBUG == 1) System.out.println("\tpi: " + um_clusters[0].pi.getArrayElement(c).asFloat());
 
-            if (DEBUG == 1) System.out.println("\tMeans:");
-            for (int d = 0; d < this.num_dimensions; d++)
-                if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].means.getArrayElement(c * this.num_dimensions + d).asFloat());
+        //     if (DEBUG == 1) System.out.println("\tMeans:");
+        //     for (int d = 0; d < this.num_dimensions; d++)
+        //         if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].means.getArrayElement(c * this.num_dimensions + d).asFloat());
 
-            if (DEBUG == 1) System.out.println("\tR:");
-            for (int d = 0; d < this.num_dimensions; d++)
-                for (int e = 0; e < this.num_dimensions; e++)
-                    if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].R.getArrayElement(c * this.num_dimensions * this.num_dimensions + d * this.num_dimensions + e).asFloat());
+        //     if (DEBUG == 1) System.out.println("\tR:");
+        //     for (int d = 0; d < this.num_dimensions; d++)
+        //         for (int e = 0; e < this.num_dimensions; e++)
+        //             if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].R.getArrayElement(c * this.num_dimensions * this.num_dimensions + d * this.num_dimensions + e).asFloat());
 
-            if (DEBUG == 1) System.out.println("\tR-inverse:");
-            for (int d = 0; d < this.num_dimensions; d++)
-                for (int e = 0; e < this.num_dimensions; e++)
-                    if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].Rinv.getArrayElement(c * this.num_dimensions * this.num_dimensions + d * this.num_dimensions + e).asFloat());
+        //     if (DEBUG == 1) System.out.println("\tR-inverse:");
+        //     for (int d = 0; d < this.num_dimensions; d++)
+        //         for (int e = 0; e < this.num_dimensions; e++)
+        //             if (DEBUG == 1) System.out.println("\t\t" + um_clusters[0].Rinv.getArrayElement(c * this.num_dimensions * this.num_dimensions + d * this.num_dimensions + e).asFloat());
 
-            if (DEBUG == 1) System.out.println("\tAvgvar: " + um_clusters[0].avgvar.getArrayElement(c).asFloat());
+        //     if (DEBUG == 1) System.out.println("\tAvgvar: " + um_clusters[0].avgvar.getArrayElement(c).asFloat());
 
-            if (DEBUG == 1) System.out.println("\tConstant: " + um_clusters[0].constant.getArrayElement(c).asFloat());
-        }
+        //     if (DEBUG == 1) System.out.println("\tConstant: " + um_clusters[0].constant.getArrayElement(c).asFloat());
+        // }
         // ------ OPENMP MASTER END (NUM_GPU == 0) ------
 
         // Synchronize after first gpu does the seeding, copy result to all gpus
@@ -319,7 +314,7 @@ public class GMM {
         int iters;
 
         //epsilon = 1e-6;
-        if (PRINT == 1) System.out.printf("Gaussian.cu: epsilon = %.6f\n", epsilon);
+        // if (PRINT == 1) System.out.printf("Gaussian.cu: epsilon = %.6f\n", epsilon);
 
         // Variables for GMM reduce order
         float distance, min_distance = 0.0F;
@@ -334,7 +329,7 @@ public class GMM {
             // Do initial E-step
             // Calculates a cluster membership probability
             // for each event and each cluster.
-            if (DEBUG == 1) System.out.println("Invoking E-step kernels.");
+            // if (DEBUG == 1) System.out.println("Invoking E-step kernels.");
             int[] gridDim = {num_clusters, this.NUM_BLOCKS};
             for (int i = 0; i < this.num_gpus; i++) {
                 estep1.execute(gridDim, this.NUM_THREADS_ESTEP)
@@ -351,11 +346,11 @@ public class GMM {
                 for (int j = 0; j < this.NUM_BLOCKS; j++)
                     likelihood += shared_likelihoods[i].getArrayElement(j).asFloat();
 
-            if (DEBUG == 1) System.out.println("Likelihood: " + likelihood);
+            // if (DEBUG == 1) System.out.println("Likelihood: " + likelihood);
 
             float change = epsilon * 2;
 
-            if (PRINT == 1) System.out.println("Performing EM algorithm on " + num_clusters + " clusters.\n");
+            // if (PRINT == 1) System.out.println("Performing EM algorithm on " + num_clusters + " clusters.\n");
             iters = 0;
             // This is the iterative loop for the EM algorithm.
             // It re-estimates parameters, re-computes constants, and then regroups the events
@@ -363,7 +358,7 @@ public class GMM {
             while (iters < this.MIN_ITERS || (Math.abs(change) > epsilon && iters < this.MAX_ITERS)) {
                 old_likelihood = likelihood;
 
-                if (DEBUG == 1) System.out.println("Invoking reestimate_parameters (M-step) kernel.");
+                // if (DEBUG == 1) System.out.println("Invoking reestimate_parameters (M-step) kernel.");
 
                 // This kernel computes a new N, pi isn't updated until compute_constants though
                 for (int i = 0; i < this.num_gpus; i++) {
@@ -374,7 +369,7 @@ public class GMM {
                 for (int g = 1; g < this.num_gpus; g++) {
                     for (int c = 0; c < num_clusters; c++) {
                         um_clusters[0].N.setArrayElement(c, um_clusters[0].N.getArrayElement(c).asFloat() + um_clusters[g].N.getArrayElement(c).asFloat());
-                        if (DEBUG == 1) System.out.println("Cluster " + c + ": N = " + um_clusters[0].N.getArrayElement(c));
+                        // if (DEBUG == 1) System.out.println("Cluster " + c + ": N = " + um_clusters[0].N.getArrayElement(c));
                     }
                 }
 
@@ -400,7 +395,7 @@ public class GMM {
                     }
                 }
                 for (int c = 0; c < num_clusters; c++) {
-                    if (DEBUG == 1) System.out.println("Cluster " + c + " Means: " + um_clusters[0].N.getArrayElement(c).asFloat());
+                    // if (DEBUG == 1) System.out.println("Cluster " + c + " Means: " + um_clusters[0].N.getArrayElement(c).asFloat());
                     for (int d = 0; d < this.num_dimensions; d++) {
                         if (um_clusters[0].N.getArrayElement(c).asFloat() > 0.5F) {
                             um_clusters[0].means.setArrayElement(c * this.num_dimensions + d,
@@ -409,7 +404,7 @@ public class GMM {
                         } else {
                             um_clusters[0].means.setArrayElement(c * this.num_dimensions + d, 0.0F);
                         }
-                        if (DEBUG == 1) System.out.println("\t" + um_clusters[0].means.getArrayElement(c * this.num_dimensions + d).asFloat());
+                        // if (DEBUG == 1) System.out.println("\t" + um_clusters[0].means.getArrayElement(c * this.num_dimensions + d).asFloat());
                     }
                 }
                 // ------ OPENMP MASTER END (NUM_GPU == 0) ------
@@ -463,17 +458,18 @@ public class GMM {
                     memcpy(um_clusters[i].R, um_clusters[0].R, 0, 0, num_clusters * this.num_dimensions * this.num_dimensions);
                 }
 
-                if (DEBUG == 1) System.out.println("Invoking constants kernel.");
+                // if (DEBUG == 1) System.out.println("Invoking constants kernel.");
                 // Inverts the R matrices, computes the constant, normalizes cluster probabilities
                 for (int i = 0; i < this.num_gpus; i++) {
                     constants_kernel.execute(num_clusters, this.NUM_THREADS_MSTEP)
                             .execute(um_clusters[i].R, um_clusters[i].Rinv, um_clusters[i].constant, um_clusters[i].N, um_clusters[i].pi, num_clusters, this.num_dimensions);
                 }
 
-                for (int temp_c = 0; temp_c < num_clusters; temp_c++)
+                /* for (int temp_c = 0; temp_c < num_clusters; temp_c++)
                     if (DEBUG == 1) System.out.println("Cluster " + temp_c +" constant: " + um_clusters[0].constant.getArrayElement(temp_c).asFloat());
+                 */
 
-                if (DEBUG == 1) System.out.println("Invoking regroup (E-step) kernel with " + this.NUM_BLOCKS + " blocks.");
+                // if (DEBUG == 1) System.out.println("Invoking regroup (E-step) kernel with " + this.NUM_BLOCKS + " blocks.");
 
                 // Compute new cluster membership probabilities for all the events
                 int[] gridDim3 = {num_clusters, this.NUM_BLOCKS};
@@ -492,28 +488,28 @@ public class GMM {
                     for (int j = 0; j < this.NUM_BLOCKS; j++)
                         likelihood += shared_likelihoods[i].getArrayElement(j).asFloat();
 
-                if (DEBUG == 1) System.out.println("Likelihood: " + likelihood);
+                // if (DEBUG == 1) System.out.println("Likelihood: " + likelihood);
                 // ------ OPENMP MASTER END (NUM_GPU == 0) ------
 
                 change = likelihood - old_likelihood;
-                if (DEBUG == 1) System.out.println("GPU " + 0 + ", Change in likelihood: " + change);
+                // if (DEBUG == 1) System.out.println("GPU " + 0 + ", Change in likelihood: " + change);
 
                 iters++;
             }
 
-            if (DEBUG == 1) System.out.println("Done with EM loop");
+            // if (DEBUG == 1) System.out.println("Done with EM loop");
 
-            for (int i = 0; i < this.num_gpus; i++) {
+            for (int i = 1; i < this.num_gpus; i++) {
                 for (int c = 0; c < num_clusters; c++) {
-                    memcpy(special_memberships, um_clusters[i].memberships, c * this.num_events + i * events_per_gpu, c * my_num_events[i], my_num_events[i]);
+                    memcpy(um_clusters[0].memberships, um_clusters[i].memberships, c * this.num_events + i * events_per_gpu, c * my_num_events[i], my_num_events[i]);
                 }
-                if (DEBUG == 1) System.out.println("GPU " + i + "done with copying cluster data from device");
+                // if (DEBUG == 1) System.out.println("GPU " + i + "done with copying cluster data from device");
             }
 
             // Calculate Rissanen Score
             rissanen = -likelihood + 0.5F * (num_clusters * (1.0F + this.num_dimensions + 0.5F * (this.num_dimensions + 1.0F) * this.num_dimensions) - 1.0F) * (float) Math.log((double) this.num_events * this.num_dimensions);
-            if (PRINT == 1) System.out.printf("Likelihood: %e\n", likelihood);
-            if (PRINT == 1) System.out.printf("\nRissanen Score: %e\n\n", rissanen);
+            // if (PRINT == 1) System.out.printf("Likelihood: %e\n", likelihood);
+            // if (PRINT == 1) System.out.printf("\nRissanen Score: %e\n\n", rissanen);
 
             // ------ OPENMP MASTER START (NUM_GPU == 0) ------
             // Save the cluster data the first time through, so we have a base rissanen score and result
@@ -530,7 +526,7 @@ public class GMM {
                 memcpy(saved_clusters.means, um_clusters[0].means, 0, 0, this.num_dimensions * num_clusters);
                 memcpy(saved_clusters.R, um_clusters[0].R, 0,0, this.num_dimensions * this.num_dimensions * num_clusters);
                 memcpy(saved_clusters.Rinv, um_clusters[0].Rinv, 0, 0, this.num_dimensions * this.num_dimensions * num_clusters);
-                memcpy(saved_clusters.memberships, special_memberships, 0, 0,this.num_events * num_clusters);
+                memcpy(saved_clusters.memberships, um_clusters[0].memberships, 0, 0,this.num_events * num_clusters);
             }
             // ------ OPENMP MASTER END (NUM_GPU == 0) ------
 
@@ -542,7 +538,7 @@ public class GMM {
                 // First eliminate any "empty" clusters
                 for (int i = num_clusters - 1; i >= 0; i--) {
                     if (um_clusters[0].N.getArrayElement(i).asFloat() < 0.5) {
-                        if (DEBUG == 1) System.out.println("Cluster #" + i + " has less than 1 data point in it.");
+                        // if (DEBUG == 1) System.out.println("Cluster #" + i + " has less than 1 data point in it.");
                         for (int j = i; j < num_clusters - 1; j++) {
                             //copy_cluster(um_clusters[0], j, um_clusters[0], j + 1, num_dimensions);
                             copy_cluster(um_clusters[0], j, um_clusters[0], j+1 , this.num_dimensions);
@@ -553,7 +549,7 @@ public class GMM {
 
                 min_c1 = 0;
                 min_c2 = 1;
-                if (DEBUG == 1) System.out.println("Number of non-empty clusters: " + num_clusters);
+                // if (DEBUG == 1) System.out.println("Number of non-empty clusters: " + num_clusters);
                 // For all combinations of subclasses...
                 // If the number of clusters got really big might need to do a non-exhaustive search
                 // Even with 100*99/2 combinations this doesn't seem to take too long
@@ -570,7 +566,7 @@ public class GMM {
                     }
                 }
 
-                if (PRINT == 1) System.out.println("Minimum distance between (" + min_c1 + ", " + min_c2 + "). Combining clusters");
+                // if (PRINT == 1) System.out.println("Minimum distance between (" + min_c1 + ", " + min_c2 + "). Combining clusters");
                 // Add the two clusters with min distance together
                 add_clusters(um_clusters[0], min_c1, min_c2, scratch_cluster, this.num_dimensions);
 
@@ -592,11 +588,8 @@ public class GMM {
                     memcpy(um_clusters[i].means, um_clusters[0].means, 0, 0, this.num_dimensions * num_clusters);
                     memcpy(um_clusters[i].R, um_clusters[0].R, 0, 0, this.num_dimensions * this.num_dimensions * num_clusters);
                     memcpy(um_clusters[i].Rinv, um_clusters[0].Rinv, 0, 0, this.num_dimensions * this.num_dimensions * num_clusters);
-                }
-
-                for (int i = 0; i < num_gpus; i++) {
                     for (int c = 0; c < num_clusters; c++) {
-                        memcpy(um_clusters[i].memberships, special_memberships, c * my_num_events[i], c * this.num_events + i * (this.num_events / this.num_gpus), my_num_events[i]);
+                        memcpy(um_clusters[i].memberships, um_clusters[0].memberships, c * my_num_events[i], c * this.num_events + i * (this.num_events / this.num_gpus), my_num_events[i]);
                     }
                 }
             } // GMM reduction block
@@ -847,9 +840,9 @@ public class GMM {
         //desired_num_clusters = Integer.parseInt(args[3]);
         //fileNameInput = args[1];
         //fileNameOutput = args[2];
-        original_num_clusters = 16;
+        original_num_clusters = 32;
         desired_num_clusters = 8;
-        fileNameInput = "/home/ubuntu/HPPS-Project/Project/gmm/data/mydata.txt";
+        fileNameInput = "/home/ubuntu/HPPS-Project/Project/gmm/data/mydata_4g.txt";
         fileNameOutput = "/home/ubuntu/HPPS-Project/Project/Part_3/results/01_out_1g_strong.txt";
 
         float[] fcs_data_by_event = gmm.readData(fileNameInput);
