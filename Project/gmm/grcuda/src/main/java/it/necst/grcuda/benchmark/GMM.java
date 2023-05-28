@@ -819,11 +819,11 @@ public class GMM {
      * Another matrix inversion function
      * This was modified from the 'cluster' application by Charles A. Bouman
      */
-    public static void main(String[]args) throws IOException {
+    public static void main(String[]args) throws FileNotFoundException {
         // Getting the context info from a file in json
         String CONFIG_PATH = "/home/ubuntu/HPPS-Project/Project/gmm/grcuda/src/main/java/it/necst/grcuda/benchmark/config/config.json";
-        Gson gson=new GsonBuilder().setPrettyPrinting().create();
-        JsonReader reader=new JsonReader(new FileReader(CONFIG_PATH));
+        Gson gson = new GsonBuilder().setPrettyPrinting().create();
+        JsonReader reader = new JsonReader(new FileReader(CONFIG_PATH));
         Config parsedConfig=gson.fromJson(reader,Config.class);
 
         // Prepare the kernels
@@ -861,13 +861,15 @@ public class GMM {
         if (gmm.PRINT) System.out.println("Results filename: " + result_filename);
 
         // Open up the output file for cluster summary
-        File outf = new File(summary_filename);
-        FileOutputStream fos = new FileOutputStream(outf);
-        PrintStream ps_file = new PrintStream(fos);
-        if (outf == null) {
+        File outf;
+        try {
+            outf = new File(summary_filename);
+        } catch (NullPointerException e) {
             System.out.println("ERROR: Unable to open file " + summary_filename + " for writing.");
             return;
         }
+        FileOutputStream fos = new FileOutputStream(outf);
+        PrintStream ps_file = new PrintStream(fos);
 
         // Print the clusters with the lowest rissanen score to the console and output file
         for(int c = 0; c < gmm.ideal_num_clusters; c++) {
