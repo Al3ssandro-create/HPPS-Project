@@ -44,6 +44,12 @@ public class GMM {
     private long start_exec;
     private long end_exec;
 
+    /** 
+     * Constractor, it sets the GrCUDA context and builds the kernels.
+     * 
+     * @param path/to/the/file that contains the dataset.
+     * @return An array contains the dataset.
+     */ 
     public GMM(Config config) {
         this.context = createContext(config);
         this.num_gpus = config.num_gpus;
@@ -66,6 +72,12 @@ public class GMM {
                 "const pointer, pointer, const pointer, const pointer, const pointer, sint32, sint32, sint32");
     }
 
+    /** 
+     * Read method.
+     * 
+     * @param path/to/the/file that contains the dataset.
+     * @return An array contains the dataset.
+     */ 
     public float[] readData(String fileName) {
         int length = fileName.length();
         System.out.println("File Extension: " + fileName.substring(length - 3));
@@ -76,12 +88,18 @@ public class GMM {
         }
     }
 
-    public float[] readBIN(String fileName) {
+    private float[] readBIN(String fileName) {
         // Not required
         return null;
     }
 
-    public float[] readCSV(String fileName) {
+    /** 
+     * Read method in csv format.
+     * 
+     * @param path/to/the/file that contains the dataset.
+     * @return An array contains the dataset.
+     */ 
+    private float[] readCSV(String fileName) {
         int num_dims = 0;
         String line1;
         ArrayList<String> lines = new ArrayList<>();
@@ -98,7 +116,6 @@ public class GMM {
         if (lines.size() > 0) {
             line1 = lines.get(0);
 
-            // Token lib
             String[] temp;
             temp = line1.split(",");
 
@@ -135,7 +152,15 @@ public class GMM {
         }
     }
 
-    public cluster_t cluster(int original_num_clusters, int desired_num_clusters, float[] fcs_data_by_event) {
+    /** 
+     * Main method that contains all the logic of the benchmark.
+     * 
+     * @param The original number of clusters when the algorithm starts.
+     * @param The desired number of clusters at the end of the algorithm.
+     * @param The dataset.
+     * @return The minimum cluster.
+     */ 
+    public Cluster_t cluster(int original_num_clusters, int desired_num_clusters, float[] fcs_data_by_event) {
         int stop_number;
 
         // Number of clusters to stop iterating at.
@@ -156,7 +181,6 @@ public class GMM {
 
         // Transpose the event data (allows coalesced access pattern in E-step kernel)
         // This has consecutive values being from the same dimension of the data
-        // (num_dimensions by num_events matrix)
         float[] fcs_data_by_dimension = new float[this.num_events * this.num_dimensions];
         for (int e = 0; e < this.num_events; e++) {
             for (int d = 0; d < this.num_dimensions; d++) {
@@ -168,11 +192,10 @@ public class GMM {
         if (PRINT) System.out.println("Number of dimensions: " + this.num_dimensions + "\n");
         if (PRINT) System.out.println("Starting with " + original_num_clusters + " cluster(s), will stop at " + stop_number + " cluster(s).");
 
-        // Setup the cluster data structures on host
-        // This the shared memory space between the GPUs
-        cluster_um[] um_clusters = new cluster_um[this.num_gpus];
+        // Setup the cluster data structures shared between the GPUs and CPU (Unified Memory)
+        Cluster_um[] um_clusters = new Cluster_um[this.num_gpus];
         for (int i = 0; i < this.num_gpus; i++) {
-            um_clusters[i] = new cluster_um();
+            um_clusters[i] = new Cluster_um();
             um_clusters[i].N = this.context.eval("grcuda", "float[" + original_num_clusters + "]");
             um_clusters[i].pi = this.context.eval("grcuda", "float[" + original_num_clusters + "]");
             um_clusters[i].constant = this.context.eval("grcuda", "float[" + original_num_clusters + "]");
@@ -184,7 +207,7 @@ public class GMM {
         }
 
         // Declare another set of clusters for saving the results of the best configuration
-        cluster_t saved_clusters = new cluster_t();
+        Cluster_t saved_clusters = new Cluster_t();
         saved_clusters.N = new float[original_num_clusters];
         saved_clusters.pi = new float[original_num_clusters];
         saved_clusters.constant = new float[original_num_clusters];
@@ -204,7 +227,7 @@ public class GMM {
         float min_rissanen = 0;
 
         // ------ OPENMP START ------
-        cluster_t scratch_cluster = new cluster_t();
+        Cluster_t scratch_cluster = new Cluster_t();
         scratch_cluster.N = new float[1];
         scratch_cluster.pi = new float[1];
         scratch_cluster.constant = new float[1];
@@ -216,7 +239,7 @@ public class GMM {
 
         if (DEBUG) System.out.println("Finished allocating memory on host for clusters.");
 
-        // determine how many events this gpu will handle
+        // Determine how many events this gpu will handle
         int events_per_gpu = this.num_events / this.num_gpus;
         int[] my_num_events = new int[this.num_gpus];
         for (int i = 0; i < this.num_gpus; i++) {
@@ -252,7 +275,7 @@ public class GMM {
         }
 
         //////////////// Initialization done, starting kernels ////////////////
-        // if (DEBUG) System.out.println("Invoking seed_clusters kernel.");
+        if (DEBUG) System.out.println("Invoking seed_clusters kernel.");
 
         // seed_clusters sets initial pi values,
         // finds the means / covariances and copies it to all the clusters
@@ -417,7 +440,6 @@ public class GMM {
                 // Covariance is symmetric, so we only need to compute N*(N+1)/2 matrix elements per cluster
                 int[] gridDim2 = {(num_clusters + this.NUM_CLUSTERS_PER_BLOCK - 1) / this.NUM_CLUSTERS_PER_BLOCK, this.num_dimensions * (this.num_dimensions + 1) / 2};
                 for (int i = 0; i < num_gpus; i++) {
-                    //mstep_covariance1<<<gridDim2, NUM_THREADS_MSTEP>>>(d_fcs_data_by_dimension,d_clusters,num_dimensions,num_clusters,my_num_events);
                     mstep_covariance2.execute(gridDim2, this.NUM_THREADS_MSTEP)
                             .execute(um_fcs_data_by_dimension[i], um_clusters[i].R, um_clusters[i].means,
                                     um_clusters[i].memberships, um_clusters[i].avgvar, this.num_dimensions, num_clusters, my_num_events[i]);
@@ -551,6 +573,7 @@ public class GMM {
                 min_c1 = 0;
                 min_c2 = 1;
                 // if (DEBUG) System.out.println("Number of non-empty clusters: " + num_clusters);
+
                 // For all combinations of subclasses...
                 // If the number of clusters got really big might need to do a non-exhaustive search
                 // Even with 100*99/2 combinations this doesn't seem to take too long
@@ -606,31 +629,76 @@ public class GMM {
         return saved_clusters;
     }
 
+    /** 
+     * Copy method based on the inputs (Value, float).
+     * 
+     * @param The destination data structure, where the data will be stored.
+     * @param The source data structure, where the data is stored right now.
+     * @param Offset in the source data structure.
+     * @param Offset in the destination data structure.
+     * @param Size of the data that must be copy.
+     */ 
     public void memcpy(Value dest, float[] src, int startDest, int startSrc, int size) {
         for (int i = 0; i < size; i ++) {
             dest.setArrayElement(startDest + i, src[startSrc + i]);
         }
     }
 
+    /** 
+     * Copy method based on the inputs (Value, Value).
+     * 
+     * @param The destination data structure, where the data will be stored.
+     * @param The source data structure, where the data is stored right now.
+     * @param Offset in the source data structure.
+     * @param Offset in the destination data structure.
+     * @param Size of the data that must be copy.
+     */ 
     public void memcpy(Value dest, Value src, int startDest, int startSrc, int size) {
         for (int i = 0; i < size; i ++) {
             dest.setArrayElement(startDest + i, src.getArrayElement(startSrc + i));
         }
     }
 
+    /** 
+     * Copy method based on the inputs (float, Value).
+     * 
+     * @param The destination data structure, where the data will be stored.
+     * @param The source data structure, where the data is stored right now.
+     * @param Offset in the source data structure.
+     * @param Offset in the destination data structure.
+     * @param Size of the data that must be copy.
+     */ 
     public void memcpy(float[] dest, Value src, int startDest, int startSrc, int size) {
         for (int i = 0; i < size; i ++) {
             dest[startDest + i] = src.getArrayElement(startSrc + i).asFloat();
         }
     }
 
+    /** 
+     * Copy method based in the input (float, float).
+     * 
+     * @param The destination data structure, where the data will be stored.
+     * @param The source data structure, where the data is stored right now.
+     * @param Offset in the source data structure.
+     * @param Offset in the destination data structure.
+     * @param Size of the data that must be copy.
+     */ 
     public void memcpy(float[] dest, float[] src, int startDest, int startSrc, int size) {
         for (int i = 0; i < size; i ++) {
             dest[startDest + i] = src[startSrc + i];
         }
     }
 
-    public void seed_clusters(cluster_um clusters, float[] fcs_data, int num_clusters, int num_dimensions, int num_event){
+    /** 
+     * Initalizer method, it sets means and N values.
+     * 
+     * @param The input cluster.
+     * @param The dataset.
+     * @param The number of clusters.
+     * @param The number of dimensions.
+     * @param The number of events.
+     */ 
+    public void seed_clusters(Cluster_um clusters, float[] fcs_data, int num_clusters, int num_dimensions, int num_event){
         float fraction;
         int seed;
         if(num_clusters > 1){
@@ -654,7 +722,16 @@ public class GMM {
         }
     }
 
-    public void copy_cluster(cluster_um dest, int c_dest, cluster_um src, int c_src, int num_dimensions) {
+    /** 
+     * Copy method for clusters depend on  the inputs (Cluster_um, Cluster_um).
+     * 
+     * @param The destination cluster.
+     * @param Source cluster index.
+     * @param The source cluster.
+     * @param Dest cluster index.
+     * @param The number of dimensions.
+     */ 
+    public void copy_cluster(Cluster_um dest, int c_dest, Cluster_um src, int c_src, int num_dimensions) {
         dest.N.setArrayElement(c_dest, src.N.getArrayElement(c_src).asFloat());
         dest.pi.setArrayElement(c_dest, src.pi.getArrayElement(c_src).asFloat());
         dest.constant.setArrayElement(c_dest, src.constant.getArrayElement(c_src).asFloat());
@@ -665,7 +742,16 @@ public class GMM {
         memcpy(dest.Rinv, src.Rinv, c_dest * num_dimensions * num_dimensions, c_src * num_dimensions * num_dimensions, num_dimensions * num_dimensions);
     }
 
-    public void copy_cluster(cluster_um dest, int c_dest, cluster_t src, int c_src, int num_dimensions) {
+    /** 
+     * Copy method for clusters depend on  the inputs (Cluster_um, Cluster_t).
+     * 
+     * @param The destination cluster.
+     * @param Source cluster index.
+     * @param The source cluster.
+     * @param Dest cluster index.
+     * @param The number of dimensions.
+     */ 
+    public void copy_cluster(Cluster_um dest, int c_dest, Cluster_t src, int c_src, int num_dimensions) {
         dest.N.setArrayElement(c_dest, src.N[c_src]);
         dest.pi.setArrayElement(c_dest, src.pi[c_src]);
         dest.constant.setArrayElement(c_dest, src.constant[c_src]);
@@ -676,12 +762,22 @@ public class GMM {
         memcpy(dest.Rinv, src.Rinv, c_dest * num_dimensions * num_dimensions, c_src * num_dimensions * num_dimensions, num_dimensions * num_dimensions);
     }
 
-    public float cluster_distance(cluster_um clusters, int c1, int c2, cluster_t temp_cluster, int num_dimensions) {
+    /** 
+     * This method compute the distance between two clusters.
+     * 
+     * @param Cluster_1 (Cluster_um).
+     * @param Index cluster 1.
+     * @param Index cluster 2.
+     * @param Cluster_2 (Cluster_t).
+     * @param The number of dimensions.
+     * @return The distance between C1 and C2. 
+     */ 
+    public float cluster_distance(Cluster_um clusters, int c1, int c2, Cluster_t temp_cluster, int num_dimensions) {
         add_clusters(clusters, c1, c2, temp_cluster, num_dimensions);
         return clusters.N.getArrayElement(c1).asFloat()*clusters.constant.getArrayElement(c1).asFloat() + clusters.N.getArrayElement(c2).asFloat()*clusters.constant.getArrayElement(c2).asFloat() - temp_cluster.N[0]*temp_cluster.constant[0];
     }
 
-    public void add_clusters(cluster_um clusters, int c1 , int c2, cluster_t temp_cluster, int num_dimensions) {
+    public void add_clusters(Cluster_um clusters, int c1 , int c2, Cluster_t temp_cluster, int num_dimensions) {
         float wt1,wt2;
 
         wt1 = (clusters.N.getArrayElement(c1)).asFloat() / (clusters.N.getArrayElement(c1).asFloat() + clusters.N.getArrayElement(c2).asFloat());
@@ -716,8 +812,10 @@ public class GMM {
 
         // Copy R to Rinv matrix
         memcpy(temp_cluster.Rinv,temp_cluster.R, 0, 0, num_dimensions*num_dimensions);
+
         // Invert the matrix
         float log_determinant = invert_cpu(temp_cluster.Rinv,num_dimensions);
+
         // Compute the constant
         temp_cluster.constant[0] = (-num_dimensions) * 0.5F * ((float) Math.log(2.0F * Math.PI)) - 0.5f * log_determinant;
 
@@ -788,7 +886,14 @@ public class GMM {
         return log_determinant;
     }
 
-    public void writeCluster(cluster_t clusters, int i, int num_dimensions) {
+    /** 
+     * This method write the information about the clusters.
+     * 
+     * @param The input cluster.
+     * @param Index.
+     * @param The number of dimensions.
+     */ 
+    public void writeCluster(Cluster_t clusters, int i, int num_dimensions) {
         System.out.printf("Probability: %.6f\n", clusters.pi[i]);
         System.out.printf("N: %.6f\n", clusters.N[i]);
         System.out.printf("Means: ");
@@ -815,11 +920,7 @@ public class GMM {
         */
     }
 
-    /*
-     * Another matrix inversion function
-     * This was modified from the 'cluster' application by Charles A. Bouman
-     */
-    public static void main(String[]args) throws FileNotFoundException {
+    public static void main(String[] args) throws FileNotFoundException {
         // Getting the context info from a file in json
         String CONFIG_PATH = "/home/ubuntu/HPPS-Project/Project/gmm/grcuda/src/main/java/it/necst/grcuda/benchmark/config/config.json";
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
@@ -848,7 +949,7 @@ public class GMM {
 
         float[] fcs_data_by_event = gmm.readData(fileNameInput);
 
-        cluster_t clusters = gmm.cluster(original_num_clusters, desired_num_clusters, fcs_data_by_event);
+        Cluster_t clusters = gmm.cluster(original_num_clusters, desired_num_clusters, fcs_data_by_event);
 
         PrintStream ps_console = System.out;
 
@@ -919,6 +1020,12 @@ public class GMM {
         }
     }
 
+    /** 
+     * This method create the GrCUDA context.
+     * 
+     * @param The config parsed from the JSON.
+     * @return Context for GrCUDA. 
+     */ 
     private Context createContext(Config config) {
         return Context
                 .newBuilder()
@@ -943,7 +1050,7 @@ public class GMM {
     }
 }
 
-class cluster_t{
+class Cluster_t{
     float[] N;
     float[] pi;
     float[] constant;
@@ -954,7 +1061,7 @@ class cluster_t{
     float[] memberships;
 }
 
-class cluster_um {
+class Cluster_um {
     Value N;
     Value pi;
     Value constant;
