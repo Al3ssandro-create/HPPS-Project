@@ -2,15 +2,9 @@
  * CUDA Expectation Maximization with Gaussian Mixture Models
  * Multi-GPU implemenetation using OpenMP
  *
- * Written By: Andrew Pangborn
- * 09/2009
- *
- * Department of Computer Engineering
- * Rochester Institute of Technology
- *
  */
 
-// includes, system
+// Includes, system
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -19,11 +13,11 @@
 #include <omp.h>
 #include <chrono> 
 
-// includes, project
+// Includes, project
 #include "gaussian.h"
 #include "invert_matrix.h"
 
-// includes, kernels
+// Includes, kernels
 #include "gaussian_kernel.cu"
 
 // Function prototypes
@@ -34,80 +28,6 @@ void printCluster(clusters_t clusters, int c, int num_dimensions);
 float cluster_distance(clusters_t clusters, int c1, int c2, clusters_t temp_cluster, int num_dimensions);
 void copy_cluster(clusters_t dest, int c_dest, clusters_t src, int c_src, int num_dimensions);
 void add_clusters(clusters_t clusters, int c1, int c2, clusters_t temp_cluster, int num_dimensions);
-
-// Since cutil timers aren't thread safe, we do it manually with cuda events
-// Removing dependence on cutil is always nice too...
-typedef struct {
-    cudaEvent_t start;
-    cudaEvent_t stop;
-    float* et;
-} cudaTimer_t;
-
-void createTimer(cudaTimer_t* timer) {
-    #pragma omp critical (create_timer) 
-    {
-        cudaEventCreate(&(timer->start));
-        cudaEventCreate(&(timer->stop));
-        timer->et = (float*) malloc(sizeof(float));
-        *(timer->et) = 0.0f;
-    }
-}
-
-void deleteTimer(cudaTimer_t timer) {
-    #pragma omp critical (delete_timer) 
-    {
-        cudaEventDestroy(timer.start);
-        cudaEventDestroy(timer.stop);
-        free(timer.et);
-    }
-}
-
-void startTimer(cudaTimer_t timer) {
-    cudaEventRecord(timer.start,0);
-}
-
-void stopTimer(cudaTimer_t timer) {
-    cudaEventRecord(timer.stop,0);
-    cudaEventSynchronize(timer.stop);
-    float tmp;
-    cudaEventElapsedTime(&tmp,timer.start,timer.stop);
-    *(timer.et) += tmp;
-}
-
-float getTimerValue(cudaTimer_t timer) {
-    return *(timer.et);
-}
-
-// Structure to hold the timers for the different kernel.
-//  One of these structs per GPU for profiling.
-typedef struct {
-    cudaTimer_t e_step;
-    cudaTimer_t m_step;
-    cudaTimer_t constants;
-    cudaTimer_t reduce;
-    cudaTimer_t memcpy;
-    cudaTimer_t cpu;
-} profile_t;
-
-// Creates the CUDA timers inside the profile_t struct
-void init_profile_t(profile_t* p) {
-    createTimer(&(p->e_step));
-    createTimer(&(p->m_step));
-    createTimer(&(p->constants));
-    createTimer(&(p->reduce));
-    createTimer(&(p->memcpy));
-    createTimer(&(p->cpu));
-}
-
-// Deletes the timers in the profile_t struct
-void cleanup_profile_t(profile_t* p) {
-    deleteTimer(p->e_step);
-    deleteTimer(p->m_step);
-    deleteTimer(p->constants);
-    deleteTimer(p->reduce);
-    deleteTimer(p->memcpy);
-    deleteTimer(p->cpu);
-}
 
 /*
  * Seeds the cluster centers (means) with random data points
@@ -136,6 +56,9 @@ void seed_clusters(clusters_t* clusters, float* fcs_data, int num_clusters, int 
     }
 }
 
+/*
+ * Main function that contains all the logic of the benchmark
+ */
 clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* final_num_clusters, int num_dimensions, int num_events, float* fcs_data_by_event) {
 	int ideal_num_clusters;
 	int stop_number;
@@ -147,6 +70,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         stop_number = desired_num_clusters;
     }
 
+    // Number of GPUs
     int num_gpus;
     CUDA_SAFE_CALL(cudaGetDeviceCount(&num_gpus));
 
@@ -178,8 +102,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
     PRINT("Number of dimensions: %d\n\n",num_dimensions);
     PRINT("Starting with %d cluster(s), will stop at %d cluster(s).\n",original_num_clusters,stop_number);
    
-    // Setup the cluster data structures on host
-    // This the shared memory space between the GPUs
+    // Setup the cluster data structures shared between the GPUs and CPU (Unified Memory)
     clusters_t* um_clusters;
     CUDA_SAFE_CALL(cudaMallocManaged(&um_clusters, sizeof(clusters_t)*num_gpus));
     for (int g = 0; g< num_gpus; g++){
@@ -192,8 +115,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].Rinv), sizeof(float)*num_dimensions*num_dimensions*original_num_clusters));
         CUDA_SAFE_CALL(cudaMallocManaged(&(um_clusters[g].memberships), sizeof(float)*original_num_clusters*num_events*2));  
     }
-
-    // Only need one copy of all the memberships
     
     // Declare another set of clusters for saving the results of the best configuration
     clusters_t* saved_clusters = (clusters_t*) malloc(sizeof(clusters_t));
@@ -211,7 +132,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
     }
     DEBUG("Finished allocating shared cluster structures on host\n");
         
-    // Used to hold the result from regroup kernel
+    // Used to hold the result from regroup kernel (Unified Memory)
     float* shared_likelihoods;
     CUDA_SAFE_CALL(cudaMallocManaged(&shared_likelihoods, sizeof(float)*NUM_BLOCKS*num_gpus));
     float likelihood, old_likelihood;
@@ -225,6 +146,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         unsigned int tid  = omp_get_thread_num();
         unsigned int num_cpu_threads = omp_get_num_threads();
 
+        // Get information about the GPU for rhis thread
         cudaSetDevice(tid);
         cudaDeviceProp prop;
         cudaGetDeviceProperties(&prop, tid);
@@ -243,31 +165,24 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 
         DEBUG("Finished allocating memory on host for clusters.\n");
         
-        // determine how many events this gpu will handle
+        // Determine how many events this GPU will handle
         int events_per_gpu = num_events / num_gpus;
         int my_num_events = events_per_gpu;
         if(tid == num_gpus-1) {
             my_num_events += num_events % num_gpus; // last gpu has to handle the remaining uneven events
         }
 
-        DEBUG("GPU %d will handle %d events\n",tid,my_num_events);
-        
-        // Setup the cluster data structures on device
-        // First allocate structures on the host, CUDA malloc the arrays
-        // Then CUDA malloc structures on the device and copy them over
+        DEBUG("GPU %d will handle %d events\n",tid,my_num_events);     
 
-        // Allocate a struct on the device 
-        DEBUG("Finished allocating memory on device for clusters.\n");      
-
-        // allocate device memory for FCS data
+        // Allocate memory for FCS data for this thread (Unified Memory)
         float* um_fcs_data_by_event;
         float* um_fcs_data_by_dimension;
-        
-        // allocate and copy relavant FCS data to device.
+
         int mem_size = num_dimensions * my_num_events * sizeof(float);
         CUDA_SAFE_CALL(cudaMallocManaged(&um_fcs_data_by_event, mem_size));
         CUDA_SAFE_CALL(cudaMallocManaged(&um_fcs_data_by_dimension, mem_size));
 
+        // Copying data from general data structure to each thread
         memcpy(um_fcs_data_by_event, &fcs_data_by_event[num_dimensions*events_per_gpu*tid], mem_size);
 
         // Copying the transposed data is trickier since it's not all contigious for the relavant events
@@ -283,23 +198,19 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 
         // seed_clusters sets initial pi values, 
         // finds the means / covariances and copies it to all the clusters
-        // TODO: Does it make any sense to use multiple blocks for this?
-        //if(tid == 0) {
         #pragma omp master
         {
-            // TODO: seed_clusters can't be done on gpu since it doesnt have all the events
+            //  TODO: seed_clusters can't be done on gpu since it doesnt have all the events
             //  Just have host pick random events for the means and use identity matrix for covariance
             //  Only tricky part is how to do average variance? 
-            //   Make a kernel for that and reduce on host like the means/covariance?
+            //  Make a kernel for that and reduce on host like the means/covariance?
             seed_clusters<<< 1, NUM_THREADS_MSTEP >>>(um_fcs_data_by_event, um_clusters, num_dimensions, original_num_clusters, my_num_events);
             cudaDeviceSynchronize();
-            //CUT_CHECK_ERROR("Seed Kernel execution failed: ");
             
             DEBUG("Invoking constants kernel.\n");
             // Computes the R matrix inverses, and the gaussian constant
             constants_kernel<<<original_num_clusters, NUM_THREADS_MSTEP>>>(um_clusters, original_num_clusters, num_dimensions);
             cudaDeviceSynchronize();
-            //CUT_CHECK_ERROR("Constants Kernel execution failed: ");
 
             seed_clusters(&um_clusters[0], fcs_data_by_event, original_num_clusters, num_dimensions, num_events);
             DEBUG("Starting Clusters\n");
@@ -337,7 +248,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             
         }
 
-        // synchronize after first gpu does the seeding, copy result to all gpus
+        // Synchronize after first gpu does the seeding, copy result to all gpus
         #pragma omp barrier
         memcpy(um_clusters[tid].N, um_clusters[0].N, sizeof(float)*original_num_clusters);
         memcpy(um_clusters[tid].pi, um_clusters[0].pi, sizeof(float)*original_num_clusters);
@@ -348,26 +259,27 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         memcpy(um_clusters[tid].Rinv, um_clusters[0].Rinv, sizeof(float)*num_dimensions*num_dimensions*original_num_clusters);
        
         // Calculate an epsilon value
-        //int ndata_points = num_events*num_dimensions;
         float epsilon = (1+num_dimensions+0.5f*(num_dimensions+1)*num_dimensions)*logf((float)num_events*num_dimensions)*0.001f;
         int iters;
         
-        //epsilon = 1e-6;
         #pragma omp master
-        PRINT("Gaussian.cu: epsilon = %f\n",epsilon);
+        {
+            PRINT("Gaussian.cu: epsilon = %f\n",epsilon);
+        }
         
         // Variables for GMM reduce order
         float distance, min_distance = 0.0;
         float rissanen;
         int min_c1, min_c2;
 
+        // Timer for exec time
         #pragma omp barrier
         auto start1 = std::chrono::steady_clock::now();
          
         for(int num_clusters=original_num_clusters; num_clusters >= stop_number; num_clusters--) {
             /*************** EM ALGORITHM *****************************/
             
-            // do initial E-step
+            // Do initial E-step
             // Calculates a cluster membership probability
             // for each event and each cluster.
             DEBUG("Invoking E-step kernels.");
@@ -390,7 +302,9 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             float change = epsilon*2;
             
             #pragma omp master
-            PRINT("Performing EM algorithm on %d clusters.\n", num_clusters);
+            {
+                PRINT("Performing EM algorithm on %d clusters.\n", num_clusters);
+            }
             iters = 0;
             // This is the iterative loop for the EM algorithm.
             // It re-estimates parameters, re-computes constants, and then regroups the events
@@ -406,7 +320,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
                 mstep_N<<<num_clusters, NUM_THREADS_MSTEP>>>(&(um_clusters[tid]), num_dimensions, num_clusters, my_num_events);
                 cudaDeviceSynchronize();
                 
-                // TODO: figure out the omp reduction pragma...
                 // Reduce N for all clusters, copy back to device
                 #pragma omp barrier
 
@@ -457,7 +370,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 
                 // Covariance is symmetric, so we only need to compute N*(N+1)/2 matrix elements per cluster
                 dim3 gridDim2(num_clusters, num_dimensions*(num_dimensions+1)/2);
-                //mstep_covariance1<<<gridDim2, NUM_THREADS_MSTEP>>>(d_fcs_data_by_dimension,d_clusters,num_dimensions,num_clusters,my_num_events);
                 mstep_covariance2<<<dim3((num_clusters+NUM_CLUSTERS_PER_BLOCK-1)/NUM_CLUSTERS_PER_BLOCK, num_dimensions*(num_dimensions+1)/2), NUM_THREADS_MSTEP>>>(um_fcs_data_by_dimension, &(um_clusters[tid]), num_dimensions, num_clusters, my_num_events);
                 cudaDeviceSynchronize();
                 
@@ -543,10 +455,11 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
             
             // Calculate Rissanen Score
             rissanen = -likelihood + 0.5f*(num_clusters*(1.0f+num_dimensions+0.5f*(num_dimensions+1.0f)*num_dimensions)-1.0f)*logf((float)num_events*num_dimensions);
-            #pragma omp master
-            PRINT("\nLikelihood: %e\n",likelihood);
-            #pragma omp master
-            PRINT("\nRissanen Score: %e\n",rissanen);
+            #pragma omp master 
+            {
+                PRINT("\nLikelihood: %e\n",likelihood);
+                PRINT("\nRissanen Score: %e\n",rissanen);
+            }
             
             #pragma omp barrier
             #pragma omp master
@@ -608,14 +521,11 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
 
                     PRINT("\nMinimum distance between (%d,%d). Combining clusters\n",min_c1,min_c2);
                     // Add the two clusters with min distance together
-                    //add_clusters(&(clusters[min_c1]),&(clusters[min_c2]),scratch_cluster,num_dimensions);
                     add_clusters(um_clusters[0],min_c1,min_c2,scratch_cluster,num_dimensions);
                     // Copy new combined cluster into the main group of clusters, compact them
-                    //copy_cluster(&(clusters[min_c1]),scratch_cluster,num_dimensions);
                     copy_cluster(um_clusters[0],min_c1,scratch_cluster,0,num_dimensions);
                     for(int i=min_c2; i < num_clusters-1; i++) {
-                        //printf("Copying cluster %d to cluster %d\n",i+1,i);
-                        //copy_cluster(&(clusters[i]),&(clusters[i+1]),num_dimensions);
+                        DEBUG("Copying cluster %d to cluster %d\n", i + 1, i);
                         copy_cluster(um_clusters[0],i,um_clusters[0],i+1,num_dimensions);
                     }
                 }
@@ -645,6 +555,7 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         auto diff1 = std::chrono::steady_clock::now() - start1;
         PROFILING("##### Time execution on device %d: %ld micro sec. #####\n", tid, std::chrono::duration_cast<std::chrono::microseconds>(diff1).count());
 
+        // Cleanup this thread
         free(scratch_cluster.N);
         free(scratch_cluster.pi);
         free(scratch_cluster.constant);
@@ -654,7 +565,6 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         free(scratch_cluster.Rinv);
         free(scratch_cluster.memberships);
              
-        // cleanup GPU memory
         CUDA_SAFE_CALL(cudaFree(um_fcs_data_by_event));
         CUDA_SAFE_CALL(cudaFree(um_fcs_data_by_dimension));
 
@@ -668,11 +578,11 @@ clusters_t* cluster(int original_num_clusters, int desired_num_clusters, int* fi
         CUDA_SAFE_CALL(cudaFree(um_clusters[tid].memberships));
     } // end of parallel block
 
+    // Main thread cleanup
+    free(fcs_data_by_dimension);
+
     CUDA_SAFE_CALL(cudaFree(shared_likelihoods));
     CUDA_SAFE_CALL(cudaFree(um_clusters));
-
-	// main thread cleanup
-	free(fcs_data_by_dimension);
 
 	*final_num_clusters = ideal_num_clusters;
 	return saved_clusters;
@@ -737,9 +647,6 @@ main( int argc, char** argv) {
 
     // Print the clusters with the lowest rissanen score to the console and output file
     for(int c=0; c<ideal_num_clusters; c++) {
-        //if(saved_clusters.N[c] == 0.0) {
-        //    continue;
-        //}
         if(ENABLE_PRINT) {
             // Output the final cluster stats to the console
             PRINT("Cluster #%d\n",c);
@@ -781,7 +688,7 @@ main( int argc, char** argv) {
         fclose(fresults);
     }
     
-    // cleanup host memory
+    // Cleanup host memory
     free(fcs_data_by_event);
 
     free(saved_clusters.N);
@@ -801,7 +708,7 @@ main( int argc, char** argv) {
 ///////////////////////////////////////////////////////////////////////////////
 int validateArguments(int argc, char** argv, int* num_clusters, int* target_num_clusters) {
     if(argc <= 5 && argc >= 4) {
-        // parse num_clusters
+        // Parse num_clusters
         if(!sscanf(argv[1],"%d",num_clusters)) {
             printf("Invalid number of starting clusters\n\n");
             printUsage(argv);
@@ -815,7 +722,7 @@ int validateArguments(int argc, char** argv, int* num_clusters, int* target_num_
             return 1;
         }
         
-        // parse infile
+        // Parse infile
         FILE* infile = fopen(argv[2],"r");
         if(!infile) {
             printf("Invalid infile.\n\n");
@@ -823,7 +730,7 @@ int validateArguments(int argc, char** argv, int* num_clusters, int* target_num_
             return 2;
         } 
         
-        // parse target_num_clusters
+        // Parse target_num_clusters
         if(argc == 5) {
             if(!sscanf(argv[4],"%d",target_num_clusters)) {
                 printf("Invalid number of desired clusters.\n\n");
@@ -929,7 +836,7 @@ void add_clusters(clusters_t clusters, int c1, int c2, clusters_t temp_cluster, 
     // Compute pi
     temp_cluster.pi[0] = clusters.pi[c1] + clusters.pi[c2];
     
-    // compute N
+    // Compute N
     temp_cluster.N[0] = clusters.N[c1] + clusters.N[c2];
 
     float log_determinant;
@@ -952,5 +859,4 @@ void copy_cluster(clusters_t dest, int c_dest, clusters_t src, int c_src, int nu
     memcpy(&(dest.means[c_dest*num_dimensions]),&(src.means[c_src*num_dimensions]),sizeof(float)*num_dimensions);
     memcpy(&(dest.R[c_dest*num_dimensions*num_dimensions]),&(src.R[c_src*num_dimensions*num_dimensions]),sizeof(float)*num_dimensions*num_dimensions);
     memcpy(&(dest.Rinv[c_dest*num_dimensions*num_dimensions]),&(src.Rinv[c_src*num_dimensions*num_dimensions]),sizeof(float)*num_dimensions*num_dimensions);
-    // do we need to copy memberships?
 }
