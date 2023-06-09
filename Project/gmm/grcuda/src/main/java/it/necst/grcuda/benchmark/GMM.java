@@ -777,6 +777,15 @@ public class GMM {
         return clusters.N.getArrayElement(c1).asFloat()*clusters.constant.getArrayElement(c1).asFloat() + clusters.N.getArrayElement(c2).asFloat()*clusters.constant.getArrayElement(c2).asFloat() - temp_cluster.N[0]*temp_cluster.constant[0];
     }
 
+    /**
+     * This method add two clusters together, this updates pi,means,R,N and stores the result in temp_cluster
+     *
+     * @param Data structure containing all the clusters
+     * @param First cluster of the sum
+     * @param Second cluster of the sum
+     * @param Result
+     * @param The numberof dimension
+     */
     public void add_clusters(Cluster_um clusters, int c1 , int c2, Cluster_t temp_cluster, int num_dimensions) {
         float wt1,wt2;
 
@@ -823,6 +832,13 @@ public class GMM {
         temp_cluster.avgvar[0] = clusters.avgvar.getArrayElement(0).asFloat();
     }
 
+    /**
+     * This method invert the matrix using LU decomposition with partial pivoting.
+     *
+     * @param The matrix that is going to be inverted
+     * @param The actual size
+     * @return The inverted matrix
+     */
     public float invert_cpu(float[] data, int actualsize){
         float log_determinant = 0.0F;
         int maxsize = actualsize;
