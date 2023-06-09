@@ -766,7 +766,9 @@ void printUsage(char** argv)
    printf("\t outfile: Clustering results output file\n");
    printf("\t target_num_clusters: A desired number of clusters. Must be less than or equal to num_clusters\n");
 }
-// print the values contained in clusters on a file
+/*
+ *print the values contained in clusters on a file
+ */
 void writeCluster(FILE* f, clusters_t clusters, int c, int num_dimensions) {
     fprintf(f,"Probability: %f\n", clusters.pi[c]);
     fprintf(f,"N: %f\n",clusters.N[c]);
@@ -794,18 +796,24 @@ void writeCluster(FILE* f, clusters_t clusters, int c, int num_dimensions) {
     } 
     */
 }
-//print the values contained in clusters on stdout
+/*
+ * print the values contained in clusters on stdout
+ */
 void printCluster(clusters_t clusters, int c, int num_dimensions) {
     writeCluster(stdout,clusters,c,num_dimensions);
 }
-//calculate the distance between two clusters
+/*
+ *calculate the distance between two clusters
+ */
 float cluster_distance(clusters_t clusters, int c1, int c2, clusters_t temp_cluster, int num_dimensions) {
     // Add the clusters together, this updates pi,means,R,N and stores in temp_cluster
     add_clusters(clusters,c1,c2,temp_cluster,num_dimensions);
     
     return clusters.N[c1]*clusters.constant[c1] + clusters.N[c2]*clusters.constant[c2] - temp_cluster.N[0]*temp_cluster.constant[0];
 }
-//add the clusters together, stores the result in temp_cluster
+/*
+ *add the clusters together, stores the result in temp_cluster
+ */
 void add_clusters(clusters_t clusters, int c1, int c2, clusters_t temp_cluster, int num_dimensions) {
     float wt1,wt2;
  
@@ -850,7 +858,9 @@ void add_clusters(clusters_t clusters, int c1, int c2, clusters_t temp_cluster, 
     // avgvar same for all clusters
     temp_cluster.avgvar[0] = clusters.avgvar[0];
 }
-//copy the value contained in src(source) in dest(destination)
+/*
+ * copy the value contained in src(source) in dest(destination)
+ */
 void copy_cluster(clusters_t dest, int c_dest, clusters_t src, int c_src, int num_dimensions) {
     dest.N[c_dest] = src.N[c_src];
     dest.pi[c_dest] = src.pi[c_src];
